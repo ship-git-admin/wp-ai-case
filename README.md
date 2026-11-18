@@ -60,6 +60,9 @@ wp ai-case mapping propose --user=<admin>
 ```
 提案した版は、ステージングで保存・読み戻し → 実表示の確認（`mapping confirm-display`）→ 承認（`mapping approve`）の順に進めます。履歴は `mapping history <mapping_id>`、以前の版へ戻すときは `mapping rollback` を使います。
 
+## 配布と更新
+配布用の ZIP は `python3 tools/build_release.py --expect-tag vX.Y.Z` で作り、検査します（dev/ と Markdown は含めません）。タグを push すると CI が下書きのリリースを作り、人が確認して公開すると各サイトの更新画面に表示されます。手順・失敗時・巻き戻しは [docs/RELEASE.md](docs/RELEASE.md)、脆弱性の報告は [SECURITY.md](SECURITY.md)。
+
 ## 守ること
 - 下書きだけを作成・編集する。公開・予約・非公開・削除、ACF 定義やテーマの変更機能は作らない。
 - 実サイトの ACF 原本・ホスト名・APIキー・顧客データをこのリポジトリに入れない。
