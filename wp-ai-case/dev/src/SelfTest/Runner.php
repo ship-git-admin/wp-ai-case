@@ -43,9 +43,13 @@ final class Runner {
 		// 試験で作る予約・使用量は試験用の月に入れ、実サイトの今月の枠・費用には数えない（最後に消す）。
 		\WpAiCase\Quota\QuotaService::$period_override = '2099-12';
 		\WpAiCase\Quota\QuotaService::$limit_override  = 1000;
+		// サイトの設定（WP_AI_CASE_PROVIDER）に関係なく、試験は Claude を基準にする（OpenAI の試験は個別に切り替える）。
+		$pin = static fn() => 'anthropic';
+		add_filter( 'wp_ai_case_provider_id', $pin, 1 );
 		try {
 			$this->groups( $group, $t );
 		} finally {
+			remove_filter( 'wp_ai_case_provider_id', $pin, 1 );
 			global $wpdb;
 			$wpdb->query( 'DELETE FROM ' . \WpAiCase\Support\Installer::quota_table() . " WHERE period = '2099-12'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
 			$wpdb->query( 'DELETE FROM ' . \WpAiCase\Support\Installer::usage_table() . " WHERE period = '2099-12'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
