@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       WP AI Case
  * Description:       入力した一次情報と写真から、AI（Claude）で施工事例（works）の下書きを作成・修正し、ACF の現在の定義に合わせて安全に保存します。公開はしません（下書きだけ）。
- * Version:           0.1.0-dev
+ * Version:           0.1.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            Ship Inc.
@@ -16,7 +16,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WP_AI_CASE_VERSION', '0.1.0-dev' );
+define( 'WP_AI_CASE_VERSION', '0.1.0' );
 define( 'WP_AI_CASE_FILE', __FILE__ );
 define( 'WP_AI_CASE_DIR', __DIR__ );
 

@@ -3,7 +3,7 @@ Contributors: shipinc
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.1.0-dev
+Stable tag: 0.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -20,7 +20,7 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 == Changelog ==
 
-= 0.1.0-dev =
+= 0.1.0 =
 * C0: 骨組み、契約 Schema、CaseDocument 検証
 * C1-A: ACF 保存アダプタ（12型）、既知マッピング、下書き保存・読み戻し・スナップショット復元
 * C1-B: ACF の構造変更の検知・停止・再マッピング・承認・巻き戻し
