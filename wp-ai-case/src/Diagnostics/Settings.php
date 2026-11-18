@@ -165,6 +165,24 @@ final class Settings {
 		return (int) apply_filters( 'wp_ai_case_daily_revise_limit', self::constant_number( 'WP_AI_CASE_DAILY_REVISE_LIMIT', 50 ) );
 	}
 
+	/**
+	 * 作成画面に、AIの呼び出しごとの推定費用を出すか（一時的な機能。2026-11-18 依頼者の希望）。
+	 * 管理者（manage_options）にだけ出す。wp-config.php で WP_AI_CASE_SHOW_COST を false にすると出さない。
+	 */
+	public static function show_cost( int $user_id ): bool {
+		if ( defined( 'WP_AI_CASE_SHOW_COST' ) && ! constant( 'WP_AI_CASE_SHOW_COST' ) ) {
+			return false;
+		}
+		return $user_id > 0 && user_can( $user_id, 'manage_options' );
+	}
+
+	/**
+	 * 円での目安の換算（1ドルあたりの円）。wp-config.php の WP_AI_CASE_JPY_PER_USD で変えられる。
+	 */
+	public static function jpy_per_usd(): float {
+		return (float) self::constant_number( 'WP_AI_CASE_JPY_PER_USD', 150.0 );
+	}
+
 	private static function constant_number( string $name, float|int $default ): float|int {
 		if ( defined( $name ) && is_numeric( constant( $name ) ) ) {
 			return is_int( $default ) ? (int) constant( $name ) : (float) constant( $name );

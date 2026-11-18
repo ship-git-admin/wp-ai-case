@@ -354,7 +354,8 @@ final class JobService {
 			@set_time_limit( self::LEASE ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		}
 		$result = $this->provider()->compose( $payload );
-		$this->cost->record( 'full' === $kind ? 'create' : ( 'compose' === $kind ? 'compose' : 'analyze' ), (string) $payload['model'], $job_id, count( $payload['images'] ), (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
+		$ckind  = 'full' === $kind ? 'create' : ( 'compose' === $kind ? 'compose' : 'analyze' );
+		$usd    = $this->cost->record( $ckind, (string) $payload['model'], $job_id, count( $payload['images'] ), (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
 
 		// 呼び出し中に取消し・再試行があれば、この結果は捨てる。
 		$fresh = $this->repo->get( $job_id );
@@ -366,6 +367,7 @@ final class JobService {
 		$data['usage']['calls']    += 1;
 		$data['usage']['input_tokens']  += (int) ( $result->data['usage']['input_tokens'] ?? 0 );
 		$data['usage']['output_tokens'] += (int) ( $result->data['usage']['output_tokens'] ?? 0 );
+		$data['costs'][]                 = self::cost_entry( $ckind, $usd, $result );
 
 		if ( ! $result->ok ) {
 			$class         = ErrorClassifier::from_provider( $result ) ?? array( 'code' => 'AI-018', 'http_class' => 'unknown' );
@@ -488,20 +490,25 @@ final class JobService {
 			throw JobError::from_case( $e, 'cost_guard', 429 );
 		}
 		$result = $this->provider()->revise( $payload );
-		$this->cost->record( 'revise', Settings::model(), $job_id, 0, (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
-		$fresh = $this->repo->get( $job_id );
+		$usd    = $this->cost->record( 'revise', Settings::model(), $job_id, 0, (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
+		$entry  = self::cost_entry( 'revise', $usd, $result );
+		$fresh  = $this->repo->get( $job_id );
 		if ( ! $fresh || (int) $fresh['job_generation'] !== (int) $job['job_generation'] || 'proposal_ready' !== $fresh['status'] || (int) $fresh['data']['index'] !== $base_index ) {
 			throw JobError::code( 'AI-012', 'revise_stale', 409 );
 		}
+		$extra = Settings::show_cost( $user ) ? array( 'cost' => $entry ) : array();
 		if ( ! $result->ok ) {
+			$this->add_cost( $fresh, $entry );
 			$class = ErrorClassifier::from_provider( $result ) ?? array( 'code' => 'AI-018', 'http_class' => 'unknown' );
-			throw new JobError( SafeErrorPresenter::present( $class['code'], 'customer', 'revise_provider_error', array( 'job_id' => $job_id, 'provider_error_type' => (string) $result->error_type ), $class['http_class'] ), 502 );
+			throw new JobError( SafeErrorPresenter::present( $class['code'], 'customer', 'revise_provider_error', array( 'job_id' => $job_id, 'provider_error_type' => (string) $result->error_type ), $class['http_class'] ), 502, $extra );
 		}
 		try {
 			$r = PatchApplier::apply( $doc, $allowed, (array) ( $result->data['content']['operations'] ?? array() ), true );
 		} catch ( CaseError $e ) {
-			throw new JobError( SafeErrorPresenter::present( 'AI-009', 'customer', 'revise_output_rejected', array( 'job_id' => $job_id, 'reason' => $e->reason ) ), 422 );
+			$this->add_cost( $fresh, $entry );
+			throw new JobError( SafeErrorPresenter::present( 'AI-009', 'customer', 'revise_output_rejected', array( 'job_id' => $job_id, 'reason' => $e->reason ) ), 422, $extra );
 		}
+		$fresh['data']['costs'][] = $entry;
 		$fresh['data']['usage']['calls']         += 1;
 		$fresh['data']['usage']['input_tokens']  += (int) ( $result->data['usage']['input_tokens'] ?? 0 );
 		$fresh['data']['usage']['output_tokens'] += (int) ( $result->data['usage']['output_tokens'] ?? 0 );
@@ -637,6 +644,7 @@ final class JobService {
 			'edit_url'        => $post && user_can( $user, 'edit_post', $post ) ? (string) get_edit_post_link( $post, 'raw' ) : null,
 			'preview_url'     => $post ? (string) get_preview_post_link( $post ) : null,
 			'expires_at'      => $job['expires_at'],
+			'cost'            => self::cost_view( $data, $user ),
 		);
 	}
 
@@ -726,6 +734,59 @@ final class JobService {
 		$data['last_change'] = array( 'by' => $by, 'changed' => $changed );
 		$data['error']    = null;
 		return $this->repo->compare_and_set( $job, array( 'data' => $data ) );
+	}
+
+	/**
+	 * 1回の呼び出しの費用の記録（ジョブの中。数値と種類だけ）。
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function cost_entry( string $kind, float $usd, \WpAiCase\AI\ProviderResult $result ): array {
+		$u = (array) ( $result->data['usage'] ?? array() );
+		return array(
+			'kind'              => $kind,
+			'usd'               => round( $usd, 6 ),
+			'input_tokens'      => (int) ( $u['input_tokens'] ?? 0 ),
+			'cache_read_tokens' => (int) ( $u['cache_read_input_tokens'] ?? 0 ),
+			'output_tokens'     => (int) ( $u['output_tokens'] ?? 0 ),
+			'ok'                => $result->ok,
+			'at'                => time(),
+		);
+	}
+
+	/**
+	 * 失敗した修正の費用も、ジョブの記録に残す（版は増やさない）。
+	 *
+	 * @param array<string,mixed> $job
+	 * @param array<string,mixed> $entry
+	 */
+	private function add_cost( array $job, array $entry ): void {
+		$data            = $job['data'];
+		$data['costs'][] = $entry;
+		try {
+			$this->repo->compare_and_set( $job, array( 'data' => $data ) );
+		} catch ( CaseError $e ) {
+			return; // 同時の操作で変わっていたら、費用の記録（使用量の表）だけに残る
+		}
+	}
+
+	/**
+	 * 画面に出す費用（管理者だけ。一時的な機能）。
+	 *
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>|null
+	 */
+	private static function cost_view( array $data, int $user ): ?array {
+		if ( ! Settings::show_cost( $user ) ) {
+			return null;
+		}
+		$costs = array_values( (array) ( $data['costs'] ?? array() ) );
+		return array(
+			'last'        => $costs ? end( $costs ) : null,
+			'total_usd'   => round( array_sum( array_column( $costs, 'usd' ) ), 6 ),
+			'calls'       => count( $costs ),
+			'jpy_per_usd' => Settings::jpy_per_usd(),
+		);
 	}
 
 	/**

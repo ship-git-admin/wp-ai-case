@@ -43,3 +43,4 @@
 .wpaic-draft { background: #fff; border: 1px solid #dcdcde; padding: 10px 12px; margin: 8px 0; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .wpaic-draft p { margin: 0; }
 .wpaic-draft-notes { margin: 4px 0 0 1.2em; list-style: disc; color: #8a6100; font-size: 12px; }
+.wpaic-cost p { margin: 4px 0; }

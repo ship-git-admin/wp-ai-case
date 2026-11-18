@@ -585,6 +585,28 @@ final class JobTests {
 			$this->t->same( null, \WpAiCase\AI\Prompts::revise_schema( $doc, array( 'facts' ) ), 'AI の操作がない部分だけを選んだら送らない' );
 		} );
 
+		$t->test( 'J-30', '呼び出しごとの推定費用をジョブに記録し、管理者にだけ返す（生成・修正・失敗した修正も記録、合計と回数）', function () use ( $images ) {
+			$s   = $this->service();
+			$job = $s->tick( $this->create( $s, $this->input( $images ) )['job_id'], $this->user );
+			$v   = JobService::view( $job, $this->user );
+			$this->t->same( array( 1, 'create', true ), array( $v['cost']['calls'] ?? null, $v['cost']['last']['kind'] ?? null, ( $v['cost']['total_usd'] ?? 0 ) > 0 ), '生成の費用' );
+			$this->t->same( null, JobService::view( $job, 0 )['cost'], '管理者以外には返さない' );
+			$job = $s->revise_ai( $job['job_id'], $this->user, 0, array( 'title' ), '短く' );
+			$v   = JobService::view( $job, $this->user );
+			$this->t->same( array( 2, 'revise' ), array( $v['cost']['calls'], $v['cost']['last']['kind'] ), '修正の費用' );
+			$e = null;
+			try {
+				$this->service( 'evil' )->revise_ai( $job['job_id'], $this->user, 1, array( 'title' ), '修正して' );
+			} catch ( JobError $err ) {
+				$e = $err;
+			}
+			$this->t->true( $e && 'AI-009' === $e->response['error_code'] && 'revise' === ( $e->extra['cost']['kind'] ?? null ), '拒否された修正の費用をエラーと一緒に返す' );
+			$v = JobService::view( $s->get_owned( $job['job_id'], $this->user ), $this->user );
+			$this->t->same( array( 3, 1 ), array( $v['cost']['calls'], $v['version_index'] ), '拒否された修正の費用も記録（版は増やさない）' );
+			$this->t->true( abs( $v['cost']['total_usd'] - array_sum( array_column( $s->get_owned( $job['job_id'], $this->user )['data']['costs'], 'usd' ) ) ) < 0.000001, '合計' );
+			$s->cancel( $job['job_id'], $this->user );
+		} );
+
 		$this->t->test( 'J-16', '試験中に AI サービス（Claude・OpenAI）への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
 	}
 

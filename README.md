@@ -48,6 +48,8 @@ Claude（既定）と OpenAI を切り替えられます。モデルはそれぞ
 | `WP_AI_CASE_MONTHLY_USD_LIMIT` | 1.0 | 月の推定費用（USD）の上限。超える見込みなら送信しない（AI-014）。0 で上限なし |
 | `WP_AI_CASE_REQUEST_USD_LIMIT` | 0.2 | 1回の依頼の推定費用（USD）の上限 |
 | `WP_AI_CASE_DAILY_REVISE_LIMIT` | 50 | 1日のAIによる修正の回数 |
+| `WP_AI_CASE_SHOW_COST` | true | 作成画面に、AIの呼び出しごとの推定費用を出す（管理者にだけ。一時的な機能）。false で出さない |
+| `WP_AI_CASE_JPY_PER_USD` | 150 | 費用の円の目安の換算（1ドルあたりの円） |
 
 推定費用は応答のトークン数と料金表（版付き）から計算した目安です。全体の実額は AI サービス側（Anthropic の Workspace／OpenAI のプロジェクト）の上限でも守ってください。
 

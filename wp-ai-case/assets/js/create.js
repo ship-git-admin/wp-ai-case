@@ -91,7 +91,7 @@
 		} ).then( function ( r ) {
 			return r.json().catch( function () { return {}; } ).then( function ( j ) {
 				if ( ! r.ok ) {
-					throw ( j && j.data && j.data.error ) ? { error: j.data.error, fields: j.data.fields || [] } : { error: { message: '通信に失敗しました。ログイン状態を確認して、もう一度お試しください。', error_code: 'AI-015' } };
+					throw ( j && j.data && j.data.error ) ? { error: j.data.error, fields: j.data.fields || [], cost: j.data.cost || null } : { error: { message: '通信に失敗しました。ログイン状態を確認して、もう一度お試しください。', error_code: 'AI-015' } };
 				}
 				return j;
 			} );
@@ -133,6 +133,29 @@
 		} catch ( e ) {}
 		render();
 	}
+	// ---------- 費用の表示（管理者だけ・一時的な機能） ----------
+	var COST_KIND = { create: '下書きの作成', analyze: '写真の解析（分割）', compose: '下書きの作成（分割後）', revise: 'AIで修正' };
+	function money( usd, rate ) {
+		var yen = usd * ( rate || 150 );
+		return '$' + usd.toFixed( 4 ) + '（約' + ( yen < 1 ? yen.toFixed( 2 ) : yen.toFixed( 1 ) ) + '円）';
+	}
+	function costLine( entry, rate ) {
+		if ( ! entry ) {
+			return '';
+		}
+		return ( COST_KIND[ entry.kind ] || entry.kind ) + '：' + money( entry.usd, rate ) +
+			'・入力 ' + ( entry.input_tokens + entry.cache_read_tokens ) + ' / 出力 ' + entry.output_tokens + ' トークン' + ( entry.ok ? '' : '（失敗。費用はかかっています）' );
+	}
+	function costBox( cost ) {
+		if ( ! cost || ! cost.calls ) {
+			return null;
+		}
+		return h( 'div', { class: 'notice notice-info inline wpaic-cost' },
+			h( 'p', {}, h( 'strong', { text: 'AIの費用（推定・管理者にだけ表示）' } ) ),
+			h( 'p', { text: '直近：' + costLine( cost.last, cost.jpy_per_usd ) } ),
+			h( 'p', { text: 'この下書きの合計：' + money( cost.total_usd, cost.jpy_per_usd ) + '（' + cost.calls + '回）。円は1ドル=' + cost.jpy_per_usd + '円で計算した目安です。' } ) );
+	}
+
 	function errorBox( err, fields ) {
 		if ( ! err ) {
 			return null;
@@ -174,6 +197,9 @@
 		}
 		if ( state.lastError ) {
 			root.appendChild( errorBox( state.lastError.error, state.lastError.fields ) );
+			if ( state.lastError.cost ) {
+				root.appendChild( h( 'div', { class: 'notice notice-info inline wpaic-cost' }, h( 'p', { text: 'この操作のAIの費用（推定・管理者にだけ表示）：' + costLine( state.lastError.cost, state.job && state.job.cost ? state.job.cost.jpy_per_usd : 150 ) } ) ) );
+			}
 		}
 		var job = state.job;
 		if ( ! job ) {
@@ -404,7 +430,7 @@
 	}
 
 	function progressView( job ) {
-		var box = h( 'div', { class: 'wpaic-progress' }, h( 'h2', { text: STATUS_TEXT[ job.status ] || job.status } ) );
+		var box = h( 'div', { class: 'wpaic-progress' }, h( 'h2', { text: STATUS_TEXT[ job.status ] || job.status } ), costBox( job.cost ) );
 		if ( job.status === 'queued' || job.status === 'analyzing' ) {
 			box.appendChild( h( 'p', {}, h( 'span', { class: 'spinner is-active wpaic-spin' } ), ' 進行状況：' + job.progress.step + ' / ' + job.progress.total + '（画面を閉じても、戻ってくれば続きから再開できます）' ) );
 			if ( ! state.busy ) {
@@ -460,6 +486,10 @@
 			h( 'button', { type: 'button', class: 'button', disabled: state.busy || job.version_index >= job.version_count - 1, on: { click: function () { busy( function () { return api( 'jobs/' + job.job_id + '/redo', 'POST', { base_index: job.version_index } ).then( setJob ); } ); } } }, 'やり直す' ), ' ',
 			h( 'span', { class: 'description', text: 'まだ公開されていません。保存しても「下書き」になります。' } ) );
 		wrap.appendChild( head );
+		var cb = costBox( job.cost );
+		if ( cb ) {
+			wrap.appendChild( cb );
+		}
 		var revising = job.mode === 'revise_draft';
 		if ( revising && job.target ) {
 			wrap.appendChild( h( 'div', { class: 'notice notice-info inline' }, h( 'p', { text: '「' + job.target.title + '」を修正しています。保存すると、この下書きのうち変更した部分だけを書き換えます（公開はされません）。' } ) ) );
@@ -652,7 +682,7 @@
 	function doneView( job ) {
 		var revised = job.mode === 'revise_draft';
 		var changes = job.saved_changes || [];
-		return h( 'div', { class: 'wpaic-done' },
+		return h( 'div', { class: 'wpaic-done' }, costBox( job.cost ),
 			h( 'div', { class: 'notice notice-success inline' },
 				h( 'p', { text: revised ? ( changes.length ? '下書きを更新しました（まだ公開されていません）。' : '変更がなかったため、下書きは書き換えていません。' ) : '施工事例の下書きとして保存しました（まだ公開されていません）。' } ),
 				revised && changes.length ? h( 'p', { text: '更新した部分：' + changes.join( '、' ) } ) : null ),
