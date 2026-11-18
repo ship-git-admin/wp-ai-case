@@ -3,11 +3,12 @@
  * 施工事例（works）の下書きだけに ACF 値を保存する。
  *
  * 手順：
- *   1) CaseDocument を検証 → 既知マッピングで値ツリーを作る
- *   2) 現在のACF定義と照合して変換（ここで1つでも問題があれば何も書かない）
- *   3) 投稿の状態（works / draft / 権限 / 編集ロック / 基準版）とスキーマを、書き込み直前にもう一度確認
- *   4) スナップショット → 書き込み → キャッシュを消して読み戻し → 一致を確認
- *   5) 途中失敗・不一致ならスナップショットへ戻す
+ *   1) CaseDocument を検証 → テンプレートの論理名で値ツリーを作る
+ *   2) この文脈の承認済みマッピング（MappingService::gate）で、現在のACFの名前・形へ変換
+ *   3) 現在のACF定義と照合して変換（ここで1つでも問題があれば何も書かない）
+ *   4) 投稿の状態（works / draft / 権限 / 編集ロック / 基準版）・ACF定義・マッピングの版を、書き込み直前にもう一度確認
+ *   5) スナップショット → 書き込み → キャッシュを消して読み戻し → 一致を確認
+ *   6) 途中失敗・不一致ならスナップショットへ戻す
  *
  * このクラスは公開・予約・非公開・削除を行わない。post_status を変更しない。
  *
@@ -19,6 +20,8 @@ namespace WpAiCase\Draft;
 use WpAiCase\Acf\FieldAdapterRegistry;
 use WpAiCase\Acf\SchemaInspector;
 use WpAiCase\Domain\CaseDocumentValidator;
+use WpAiCase\Mapping\MappingService;
+use WpAiCase\Mapping\MappingTranslator;
 use WpAiCase\Mapping\ShipWorksTemplateV11;
 use WpAiCase\Plugin;
 use WpAiCase\Support\CaseError;
@@ -28,38 +31,43 @@ defined( 'ABSPATH' ) || exit;
 final class DraftWriter {
 
 	public const AUDIT_META = '_wp_ai_case_last_write';
+	public const POC_MARK   = '_wp_ai_case_poc';
 
 	private SchemaInspector $inspector;
 	private FieldAdapterRegistry $registry;
 	private ShipWorksTemplateV11 $template;
+	private MappingService $mappings;
 
-	public function __construct( ?SchemaInspector $inspector = null, ?FieldAdapterRegistry $registry = null, ?ShipWorksTemplateV11 $template = null ) {
+	public function __construct( ?SchemaInspector $inspector = null, ?FieldAdapterRegistry $registry = null, ?ShipWorksTemplateV11 $template = null, ?MappingService $mappings = null ) {
 		$this->inspector = $inspector ?? new SchemaInspector();
 		$this->registry  = $registry ?? new FieldAdapterRegistry();
 		$this->template  = $template ?? new ShipWorksTemplateV11();
+		$this->mappings  = $mappings ?? new MappingService( $this->inspector );
 	}
 
 	/**
 	 * CaseDocument から新しい下書きを作って保存する。
 	 *
 	 * @param array<string,mixed> $doc
-	 * @param array<string,mixed> $options hero（FV強制）, extra_meta（印など）, groups_override（試験用の合成定義）
+	 * @param array<string,mixed> $options hero（FV強制）, terms（taxonomy => term_id[]）, extra_meta（印など）,
+	 *                                     mapping（検証中の候補で合成下書きに保存するときだけ）
 	 * @return array<string,mixed>
 	 */
 	public function create_from_document( array $doc, int $user_id, array $options = array() ): array {
 		( new CaseDocumentValidator() )->validate( $doc );
-		$built = $this->template->build( $doc, $options );
 
 		$type_obj = get_post_type_object( Plugin::POST_TYPE );
 		if ( ! $type_obj || ! user_can( $user_id, $type_obj->cap->edit_posts ) ) {
 			throw new CaseError( CaseError::POST_STATE, '施工事例の下書きを作る権限がありません' );
 		}
 
-		// 投稿を作る前に、新規投稿の条件で照合を済ませる（失敗したら何も作らない）。
-		$context  = $this->inspector->context( Plugin::POST_TYPE, 0, array() );
-		$groups   = $options['groups_override'] ?? $this->inspector->groups( $context );
-		$pre_hash = $this->inspector->schema_hash( $groups );
-		$this->registry->prepare_top_level( SchemaInspector::top_level_index( $groups ), $built['fields'], array() );
+		// 投稿を作る前に、新規投稿の条件（予定のターム）で照合を済ませる（失敗したら何も作らない）。
+		$terms   = array_map( static fn( $ids ) => array_map( 'intval', (array) $ids ), (array) ( $options['terms'] ?? array() ) );
+		$context = $this->inspector->context( Plugin::POST_TYPE, 0, $terms );
+		$mapping = $this->select_mapping( $context, $options );
+		$fields  = $this->translate( $doc, $mapping, $options, $built );
+		$groups  = $this->inspector->groups( $context );
+		$this->registry->prepare_top_level( SchemaInspector::top_level_index( $groups ), $fields, array() );
 		$this->check_image_coverage( $built['image_ids'] );
 
 		$post_id = wp_insert_post(
@@ -77,15 +85,20 @@ final class DraftWriter {
 		foreach ( (array) ( $options['extra_meta'] ?? array() ) as $key => $value ) {
 			update_post_meta( $post_id, (string) $key, $value );
 		}
+		foreach ( $terms as $taxonomy => $ids ) {
+			if ( $ids ) {
+				wp_set_object_terms( $post_id, $ids, (string) $taxonomy, false );
+			}
+		}
 		Snapshot::flush( $post_id );
 		$post = get_post( $post_id );
 
 		$result = $this->write_fields(
 			$post_id,
-			$built['fields'],
+			$fields,
 			$user_id,
 			(string) $post->post_modified_gmt,
-			$pre_hash,
+			$mapping,
 			$options + array( 'expected_images' => $built['image_ids'] )
 		);
 		return $result + array(
@@ -95,20 +108,39 @@ final class DraftWriter {
 	}
 
 	/**
-	 * 既存の下書きへ、指定したフィールドだけを書く（指定のないフィールドは保持）。
+	 * CaseDocument を、マッピングを通して現在のACFの名前の値ツリーにする（保存はしない）。
 	 *
-	 * @param array<string,mixed> $fields  name => 値
-	 * @param array<string,mixed> $options groups_override, expected_images
+	 * @param array<string,mixed>      $doc
+	 * @param array<string,mixed>      $mapping
+	 * @param array<string,mixed>      $options
+	 * @param array<string,mixed>|null $built   テンプレートの出力（参照で返す）
 	 * @return array<string,mixed>
 	 */
-	public function write_fields( int $post_id, array $fields, int $user_id, string $base_modified_gmt, ?string $expected_schema_hash = null, array $options = array() ): array {
+	public function translate( array $doc, array $mapping, array $options = array(), ?array &$built = null ): array {
+		$built = $this->template->build( $doc, $options );
+		return ( new MappingTranslator() )->translate( $built['fields'], ShipWorksTemplateV11::logical_schema(), (array) $mapping['document']['bindings'] );
+	}
+
+	/**
+	 * 既存の下書きへ、指定したフィールドだけを書く（指定のないフィールドは保持）。
+	 *
+	 * @param array<string,mixed> $fields  現在のACFの name => 値
+	 * @param array<string,mixed> $mapping この保存を許可するマッピングの版（開始時に取得したもの）
+	 * @param array<string,mixed> $options expected_images
+	 * @return array<string,mixed>
+	 */
+	public function write_fields( int $post_id, array $fields, int $user_id, string $base_modified_gmt, array $mapping, array $options = array() ): array {
 		$this->guard_post( $post_id, $user_id, $base_modified_gmt );
+		$this->guard_poc_only( $post_id, $mapping );
 
 		$context = $this->inspector->context( Plugin::POST_TYPE, $post_id );
-		$groups  = $options['groups_override'] ?? $this->inspector->groups( $context );
+		$groups  = $this->inspector->groups( $context );
 		$hash    = $this->inspector->schema_hash( $groups );
-		if ( null !== $expected_schema_hash && ! hash_equals( $expected_schema_hash, $hash ) ) {
+		if ( ! hash_equals( (string) $mapping['schema_sha256'], $hash ) ) {
 			throw new CaseError( CaseError::SCHEMA_CHANGED, '開始時と保存直前でACFの適用定義が違います', array( 'post_id' => $post_id ) );
+		}
+		if ( ! hash_equals( (string) $mapping['context_hash'], $this->inspector->context_hash( $context, $groups ) ) ) {
+			throw new CaseError( CaseError::MAPPING_NOT_READY, 'この下書きの適用条件（タクソノミー等）がマッピングと違います', array( 'post_id' => $post_id ) );
 		}
 
 		$index = SchemaInspector::top_level_index( $groups );
@@ -124,8 +156,9 @@ final class DraftWriter {
 		$snapshot = Snapshot::capture( $post_id );
 		Snapshot::persist( $snapshot );
 
-		// 書き込み直前の再確認（TOCTOU 対策）。
+		// 書き込み直前の再確認（TOCTOU 対策）：投稿の状態・ACF定義・マッピングの版。
 		$this->guard_post( $post_id, $user_id, $base_modified_gmt );
+		$this->mappings->assert_still_current( $mapping, $this->inspector->groups( $this->inspector->context( Plugin::POST_TYPE, $post_id ) ) );
 
 		$written = 0;
 		try {
@@ -164,9 +197,11 @@ final class DraftWriter {
 			'at'                => gmdate( 'c' ),
 			'user_id'           => $user_id,
 			'template'          => ShipWorksTemplateV11::TEMPLATE_ID . '@' . ShipWorksTemplateV11::TEMPLATE_VERSION,
-			'mapping'           => 'builtin-c1a',
+			'mapping_id'        => (string) $mapping['mapping_id'],
+			'mapping_version'   => (int) $mapping['mapping_version'],
+			'mapping_status'    => (string) $mapping['status'],
 			'schema_sha256'     => $hash,
-			'context_sha256'    => $this->inspector->context_hash( $context ),
+			'context_sha256'    => (string) $mapping['context_hash'],
 			'fields'            => array_map( static fn( $i ) => (string) $i['field']['name'], array_values( $prepared ) ),
 			'readback'          => 'ok',
 			'post_modified_gmt' => (string) $post->post_modified_gmt,
@@ -174,16 +209,51 @@ final class DraftWriter {
 		update_post_meta( $post_id, self::AUDIT_META, wp_slash( $audit ) );
 
 		return array(
-			'post_id'             => $post_id,
-			'post_status'         => (string) $post->post_status,
-			'schema_sha256'       => $hash,
-			'context_sha256'      => $audit['context_sha256'],
-			'groups'              => array_map( static fn( $g ) => (string) $g['title'], $groups ),
-			'fields_written'      => $audit['fields'],
-			'readback'            => 'ok',
-			'attachments'         => $this->registry->referenced_attachments(),
-			'related_posts'       => $this->registry->referenced_posts(),
+			'post_id'         => $post_id,
+			'post_status'     => (string) $post->post_status,
+			'schema_sha256'   => $hash,
+			'context_sha256'  => $audit['context_sha256'],
+			'mapping_id'      => $audit['mapping_id'],
+			'mapping_version' => $audit['mapping_version'],
+			'groups'          => array_map( static fn( $g ) => (string) $g['title'], $groups ),
+			'fields_written'  => $audit['fields'],
+			'readback'        => 'ok',
+			'attachments'     => $this->registry->referenced_attachments(),
+			'related_posts'   => $this->registry->referenced_posts(),
 		);
+	}
+
+	/**
+	 * 承認済みのマッピングを選ぶ。検証中の候補を使えるのは、合成データの下書き（印付き）だけ。
+	 *
+	 * @param array{post_type:string,post_id:int,post_terms:array<string,int[]>} $context
+	 * @param array<string,mixed>                                                $options
+	 * @return array<string,mixed>
+	 */
+	private function select_mapping( array $context, array $options ): array {
+		if ( empty( $options['mapping'] ) ) {
+			return $this->mappings->gate( $context );
+		}
+		$mapping = $options['mapping'];
+		if ( 'approved_active' !== $mapping['status'] && '1' !== (string) ( $options['extra_meta'][ self::POC_MARK ] ?? '' ) ) {
+			throw new CaseError( CaseError::MAPPING_NOT_READY, '未承認のマッピングで保存できるのは、検証用の合成下書きだけです' );
+		}
+		$cur = $this->mappings->current( $context );
+		if ( $cur['context_hash'] !== $mapping['context_hash'] || $cur['schema_sha256'] !== $mapping['schema_sha256'] ) {
+			throw new CaseError( CaseError::MAPPING_NOT_READY, 'マッピングの版が、この投稿の現在の定義と一致しません' );
+		}
+		return $mapping;
+	}
+
+	/**
+	 * 未承認の版での書き込みは、合成データの下書きだけに限る。
+	 *
+	 * @param array<string,mixed> $mapping
+	 */
+	private function guard_poc_only( int $post_id, array $mapping ): void {
+		if ( 'approved_active' !== $mapping['status'] && '1' !== (string) get_post_meta( $post_id, self::POC_MARK, true ) ) {
+			throw new CaseError( CaseError::MAPPING_NOT_READY, '未承認のマッピングで保存できるのは、検証用の合成下書きだけです', array( 'post_id' => $post_id ) );
+		}
 	}
 
 	/**

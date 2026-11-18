@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Site and context scoped ACF mapping, versioned and approved",
-  "$id": "https://example.invalid/wp-ai-case/v0.5/acf_mapping.schema.json",
+  "$id": "https://example.invalid/wp-ai-case/v0.6.2/acf_mapping.schema.json",
   "type": "object",
   "properties": {
     "mapping_id": {
@@ -111,7 +111,8 @@
           },
           "field_type": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "ACF field type, or 'layout' for a flexible-content layout binding"
           },
           "path": {
             "type": "array",
@@ -165,6 +166,10 @@
               "transform_registered"
             ],
             "additionalProperties": false
+          },
+          "layout_key": {
+            "type": "string",
+            "description": "layout bindings only: the ACF layout key (for same_key matching on rebuild)"
           }
         },
         "required": [
@@ -208,6 +213,11 @@
         "verified_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "tested_theme_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "theme files fingerprint at staging validation; differs later => display recheck required (save still allowed)"
         }
       },
       "required": [
@@ -246,6 +256,30 @@
     },
     "notes": {
       "type": "string"
+    },
+    "problems": {
+      "type": "array",
+      "description": "blocked_unsupported only: why the rebuild could not be completed (no AI guess)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "kind",
+          "message"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -292,5 +326,5 @@
       }
     }
   ],
-  "description": "Bindings are untrusted proposals until verified. PHP requires every approved binding verification boolean true and schema/context hashes to match current runtime; schema cannot compare cross-field equality."
+  "description": "Bindings are untrusted proposals until verified. PHP requires every approved binding verification boolean true and schema/context hashes to match current runtime; schema cannot compare cross-field equality. v0.6.2: layout_key, validation.tested_theme_fingerprint, problems added."
 }

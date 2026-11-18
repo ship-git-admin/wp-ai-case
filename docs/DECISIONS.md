@@ -39,3 +39,25 @@
 ## D-008 開発専用ツールは `wp-ai-case/dev/` に置き、配布ZIPに含めない
 - 合成データの投入・検証・後片付け、自己テスト、表示確認用の期限付きプレビュー。
 - プレビューは印の付いた合成データの下書きだけ、トークンのハッシュのみ保存、最長2時間。DB の投稿状態は変更しない。
+
+## D-009 マッピングの持ち方（C1-B）
+- 既知マッピング（`ShipWorksTemplateV11`）は「テンプレートの論理名」で値ツリーを作り、`logical_schema()` でその論理構造を宣言する。
+- サイトごとの実際の保存先は、版ごとに不変の **bindings**（論理ノード → field key / 名前の経路 / 型 / 変換）として DB（`wpaic_mappings`）に保存する。状態遷移は `wpaic_mapping_events` に記録する（契約 `acf_mapping` / `mapping_transition`）。
+- 結び付けは AI を使わないルールだけで行う：前の版と同じキー → 同じ名前 → 見つからなければ「問題」。**別の親への移動は追わない**（未対応として止める）。
+- 登録済みの変換：text→textarea、text/textarea→wysiwyg、select↔radio、group→repeater（1行）。これ以外の型変更は未対応。
+- 文脈（context_hash）は「投稿タイプ＋実際に適用されるグループ（key と location）」の指紋。タームが違っても適用グループが同じなら同じ文脈。
+
+## D-010 自動で続けてよい変更は「互換」だけ
+- マッピングが使うフィールド・レイアウトの定義が1つも変わらず、使っていない部分だけが変わった場合のみ、構造検証を通して自動で新しい版に引き継ぐ（イベント `compatible_update`）。
+- それ以外（キーだけの違い・根本変更・未対応・判断できない）は、その文脈の保存を止め、提案 → 構造検証 → ステージング保存・読み戻し → 実表示の確認 → 管理者承認 を経て再開する。
+- テーマだけが変わった場合（schema hash は同じ）は保存を止めず、表示の状態を `recheck_required` として区別する。
+
+## D-011 管理者の操作は当面 WP-CLI（GUI は C1-C）
+- `wp ai-case mapping status|propose|list|show|history|confirm-display|approve|retire|rollback`。いずれも `manage_options` が必要。
+- 管理画面（旧/新の対比・承認ボタン）は C1-C で、顧客向け画面・接続診断と一緒に作る。
+
+## D-012 ステージング検証用の合成下書き作成は、まだ開発ツール（dev/）
+- `wp ai-case poc verify-mapping` は合成データと合成画像を使うため dev/ にある。配布版でも管理者がステージングで検証できるよう、C1-C で合成画像を同梱して本体へ移す。
+
+## D-013 契約 v0.6.2（acf_mapping）
+- bindings に `layout_key`（レイアウトの結び付け用）、validation に `tested_theme_fingerprint`、未対応時の `problems` を追加。

@@ -23,7 +23,7 @@ final class Runner {
 	 * ## OPTIONS
 	 *
 	 * [--group=<group>]
-	 * : unit / integration / all
+	 * : unit / mapping / integration / all
 	 * ---
 	 * default: all
 	 * ---
@@ -43,11 +43,14 @@ final class Runner {
 		if ( in_array( $group, array( 'unit', 'all' ), true ) ) {
 			( new UnitTests( $t ) )->run();
 		}
+		$user_id = get_current_user_id();
+		if ( in_array( $group, array( 'mapping', 'integration', 'all' ), true ) && $user_id < 1 ) {
+			\WP_CLI::error( 'mapping / integration には --user=<管理者> が必要です' );
+		}
+		if ( in_array( $group, array( 'mapping', 'all' ), true ) ) {
+			( new MappingTests( $t, $user_id ) )->run();
+		}
 		if ( in_array( $group, array( 'integration', 'all' ), true ) ) {
-			$user_id = get_current_user_id();
-			if ( $user_id < 1 ) {
-				\WP_CLI::error( 'integration には --user=<管理者> が必要です' );
-			}
 			( new IntegrationTests( $t, $user_id ) )->run();
 		}
 

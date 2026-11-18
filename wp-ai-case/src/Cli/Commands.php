@@ -64,7 +64,7 @@ final class Commands {
 			'post_id'        => $post_id,
 			'groups'         => array_map( static fn( $g ) => (string) $g['title'], $groups ),
 			'schema_sha256'  => $inspector->schema_hash( $groups ),
-			'context_sha256' => $inspector->context_hash( $context ),
+			'context_sha256' => $inspector->context_hash( $context, $groups ),
 			'field_types'    => array(),
 		);
 		foreach ( $types as $type => $count ) {

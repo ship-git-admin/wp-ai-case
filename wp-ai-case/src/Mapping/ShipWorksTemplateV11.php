@@ -2,10 +2,10 @@
 /**
  * 共通テンプレート「施工事例 ver1.1」向けの既知マッピング（AIを使わない固定ルール）。
  *
- * CaseDocument（ACF非依存）から「フィールド名で書いた値ツリー」を作る。
- * - ここではフィールド名・レイアウト名だけを使う。field key はサイトごとに違ってよいので、
- *   保存時に FieldAdapterRegistry が現在のACF定義から解決する。
- * - 同じテンプレート名でも構造が違えば、保存時の照合で MAPPING_MISMATCH として止まる。
+ * CaseDocument（ACF非依存）から「テンプレートの論理名で書いた値ツリー」を作る。
+ * - 論理名は、このテンプレートが前提とする構造（logical_schema）の名前。
+ * - 実際の保存先（field key・名前・型・階層）は、サイトごとに承認されたマッピング（bindings）で
+ *   MappingTranslator が変換する。構造が変わったときはマッピングを作り直して承認する。
  * - 事実（工期・費用など）は入力された値（status=provided）だけを使い、推測で埋めない。
  * - 画像は「含める」ものをすべて、工程（before/during/after/unknown）ごとのユニットに入れる。
  * - 関連付け（お客様の声・担当スタッフ・監修者）は紐付けがあるときだけ書く。
@@ -50,6 +50,134 @@ final class ShipWorksTemplateV11 {
 
 	/** 写真ユニットの表示形式（type-b = ラージ/PC2カラム）。 */
 	private const UNIT_LAYOUT = 'type-b';
+
+	/**
+	 * このテンプレートが値を書く論理構造。
+	 * 各ノード：['type' => ACF型, 'children' => [名前 => ノード]（group/repeater）, 'layouts' => [レイアウト名 => [名前 => ノード]]（flexible_content）]
+	 *
+	 * @return array<string,array<string,mixed>>
+	 */
+	public static function logical_schema(): array {
+		$f  = static fn( string $type ): array => array( 'type' => $type );
+		$g  = static fn( array $children ): array => array( 'type' => 'group', 'children' => $children );
+		$r  = static fn( array $children ): array => array( 'type' => 'repeater', 'children' => $children );
+		$fc = static fn( array $layouts ): array => array( 'type' => 'flexible_content', 'layouts' => $layouts );
+
+		$subtitle = static fn( string $layout_field, string $catch, string $text ): array => array(
+			$layout_field => $f( 'radio' ),
+			$catch        => $f( 'text' ),
+			$text         => $f( 'textarea' ),
+		);
+		$unit = static function ( string $p ) use ( $f, $r ): array {
+			return array(
+				"EntryData_Picture{$p}_layout" => $f( 'radio' ),
+				"EntryData_Picture{$p}_Pop"    => $f( 'true_false' ),
+				"EntryData_Picture{$p}_Trim02" => $f( 'true_false' ),
+				"EntryData_Picture{$p}"        => $r(
+					array(
+						"EntryData_Picture{$p}_Image" => $f( 'image' ),
+						"EntryData_Picture{$p}_Title" => $f( 'text' ),
+						"EntryData_Picture{$p}_Txt"   => $f( 'textarea' ),
+						"EntryData_Picture{$p}_Trim"  => $f( 'true_false' ),
+					)
+				),
+			);
+		};
+		$phase = static fn( string $p ) => $fc(
+			array(
+				"EntryData_Section{$p}_SubTitle" => $subtitle( 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text' ),
+				"EntryData_Section{$p}_Unit"     => $unit( $p ),
+			)
+		);
+		$outline = array();
+		foreach ( self::OUTLINE as [ $layout, $sub ] ) {
+			$outline[ $layout ] = array( $sub => $f( 'text' ) );
+		}
+
+		return array(
+			'FV_Layout'             => $f( 'select' ),
+			'EntryData_CatchImg'    => $g(
+				array(
+					'EntryData_CatchImg02'      => $f( 'image' ),
+					'EntryData_CatchImg02_Trim' => $f( 'true_false' ),
+				)
+			),
+			'FV_Layout_Gallery'     => $r(
+				array(
+					'FV_Layout_Gallery_img'  => $f( 'image' ),
+					'FV_Layout_Gallery_alt'  => $f( 'text' ),
+					'FV_Layout_Gallery_Trim' => $f( 'true_false' ),
+				)
+			),
+			'FV_Layout_BeforeAfter' => $g(
+				array(
+					'FV_Layout_BeforeAfter_Image_Before' => $f( 'image' ),
+					'FV_Layout_BeforeAfter_Image_After'  => $f( 'image' ),
+					'FV_Layout_BeforeAfter_BeforeTrim'   => $f( 'true_false' ),
+					'FV_Layout_BeforeAfter_AfterTrim'    => $f( 'true_false' ),
+				)
+			),
+			'EntryData_CatchTxt'    => $f( 'text' ),
+			'EntryData_Description' => $f( 'textarea' ),
+			'Request'               => $f( 'wysiwyg' ),
+			'Proposal'              => $f( 'wysiwyg' ),
+			'EntryData_Commodity'   => $f( 'textarea' ),
+			'Outline'               => $fc( $outline ),
+			'Format'                => $fc(
+				array(
+					'EntryData_Label_Detail' => array(
+						'EntryData_Group_Detail' => $g(
+							array(
+								'EntryData_SectionMae' => $phase( 'Mae' ),
+								'EntryData_SectionChu' => $phase( 'Chu' ),
+								'EntryData_SectionGo'  => $phase( 'Go' ),
+							)
+						),
+					),
+					'Feature_Label'          => array(
+						'Feature' => $fc(
+							array(
+								'Feature_Label_SubtitleText'    => $subtitle( 'Feature_SubtitleText_Layout', 'Feature_SubtitleText_Subtitle', 'Feature_SubtitleText_Text' ),
+								'EntryData_SectionFeature_Unit' => $unit( 'Feature' ),
+							)
+						),
+					),
+					'BeforeAfter_Label'      => array(
+						'BeforeAfter' => $fc(
+							array(
+								'BeforeAfter_Label_SubtitleText'    => $subtitle( 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text' ),
+								'EntryData_SectionBeforeAfter_Unit' => array(
+									'EntryData_PictureBeforeAfter' => $g(
+										array(
+											'EntryData_PictureBeforeAfter_Pop'          => $f( 'true_false' ),
+											'EntryData_PictureBeforeAfter_Trim'         => $f( 'true_false' ),
+											'EntryData_PictureBeforeAfter_Trim02'       => $f( 'true_false' ),
+											'EntryData_PictureBeforeAfter_Image_Before' => $f( 'image' ),
+											'EntryData_PictureBeforeAfter_Image_After'  => $f( 'image' ),
+											'EntryData_PictureBeforeAfter_Txt_Before'   => $f( 'textarea' ),
+											'EntryData_PictureBeforeAfter_Txt_After'    => $f( 'textarea' ),
+										)
+									),
+								),
+							)
+						),
+					),
+				)
+			),
+			'EntryData_RelatedData' => $f( 'relationship' ),
+			'entrydata_supervision' => $f( 'relationship' ),
+			'EntryData_Staff'       => $r(
+				array(
+					'EntryData_Staff_Name'  => $f( 'relationship' ),
+					'EntryData_Staff_Voice' => $f( 'textarea' ),
+				)
+			),
+			'title'                 => $f( 'textarea' ),
+			'h1'                    => $f( 'textarea' ),
+			'keywords'              => $f( 'textarea' ),
+			'description'           => $f( 'textarea' ),
+		);
+	}
 
 	/**
 	 * @param array<string,mixed> $doc     検証済みの CaseDocument

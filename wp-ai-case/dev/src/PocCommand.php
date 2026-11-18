@@ -12,6 +12,7 @@ use WpAiCase\Acf\SchemaInspector;
 use WpAiCase\Domain\CaseDocumentValidator;
 use WpAiCase\Draft\DraftWriter;
 use WpAiCase\Draft\Snapshot;
+use WpAiCase\Mapping\MappingService;
 use WpAiCase\Mapping\ShipWorksTemplateV11;
 use WpAiCase\Plugin;
 use WpAiCase\Support\CaseError;
@@ -80,6 +81,9 @@ final class PocCommand {
 	/**
 	 * 合成の CaseDocument から施工事例の下書きを作って保存し、読み戻しを確認する。
 	 *
+	 * 既定では、その文脈の承認済みマッピングを使う（無ければ AI-010 で止まる）。
+	 * --mapping を付けると検証中の候補を使う（合成下書き専用）。
+	 *
 	 * ## OPTIONS
 	 *
 	 * [--fixture=<name>]
@@ -89,40 +93,30 @@ final class PocCommand {
 	 * ---
 	 *
 	 * [--hero=<hero>]
-	 * : FVレイアウトを指定（single / gallery / before_after / auto）。省略時はフィクスチャの指定。
+	 * : FVレイアウトを指定（single / gallery / before_after / auto）。
+	 *
+	 * [--test-context]
+	 * : 構造変更テスト用のタームを付けた文脈で作る。
+	 *
+	 * [--mapping=<id:version>]
+	 * : 検証中のマッピング候補を使う。
 	 *
 	 * [--voice=<id>]
-	 * : お客様の声の投稿ID（省略時は公開中の最初の1件）。
+	 * : お客様の声の投稿ID
 	 *
 	 * [--staff=<id>]
-	 * : 担当スタッフの投稿ID。
+	 * : 担当スタッフの投稿ID
 	 *
 	 * [--supervisor=<id>]
-	 * : 監修者（スタッフ）の投稿ID。
+	 * : 監修者の投稿ID
 	 *
 	 * @param array<int,string>    $args
 	 * @param array<string,string> $assoc
 	 */
 	public function write( array $args, array $assoc ): void {
-		$user_id   = $this->require_user();
-		$fixture   = (string) ( $assoc['fixture'] ?? 'poc_full' );
-		$relations = array_merge( Poc::default_relations(), array_filter( array_map( 'intval', array_intersect_key( $assoc, array_flip( array( 'voice', 'staff', 'supervisor' ) ) ) ) ) );
+		$user_id = $this->require_user();
 		try {
-			$doc     = Poc::load_fixture( $fixture, $relations );
-			$options = array(
-				'extra_meta' => array(
-					Poc::MARK                  => '1',
-					'_wp_ai_case_poc_fixture'  => $fixture,
-				),
-			);
-			if ( ! empty( $assoc['hero'] ) ) {
-				$options['hero'] = (string) $assoc['hero'];
-			}
-			$result = ( new DraftWriter() )->create_from_document( $doc, $user_id, $options );
-			update_post_meta( $result['post_id'], '_wp_ai_case_poc_doc', wp_slash( wp_json_encode( $doc, JSON_UNESCAPED_UNICODE ) ) );
-			if ( ! empty( $options['hero'] ) ) {
-				update_post_meta( $result['post_id'], '_wp_ai_case_poc_hero', $options['hero'] );
-			}
+			$result = $this->create( $assoc, $user_id );
 		} catch ( CaseError $e ) {
 			\WP_CLI::line( (string) wp_json_encode( array( 'ok' => false ) + $e->to_array(), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
 			\WP_CLI::halt( 1 );
@@ -131,7 +125,84 @@ final class PocCommand {
 	}
 
 	/**
-	 * 保存済みの合成下書きを、DBから読み直して期待値と比べる。
+	 * マッピング候補をステージングで検証する：合成下書きを作って保存・読み戻しし、合格を記録する（管理者）。
+	 * 実表示の確認は、この後 `poc render` / プレビューで行い、`mapping confirm-display` で記録する。
+	 *
+	 * ## OPTIONS
+	 *
+	 * <mapping_id>
+	 * : マッピングID（uuid）
+	 *
+	 * <version>
+	 * : 版の番号
+	 *
+	 * [--test-context]
+	 * : 構造変更テスト用のタームを付けた文脈。
+	 *
+	 * [--hero=<hero>]
+	 * : FVレイアウト
+	 * ---
+	 * default: before_after
+	 * ---
+	 *
+	 * @subcommand verify-mapping
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function verify_mapping( array $args, array $assoc ): void {
+		$user_id = $this->require_user();
+		try {
+			$assoc['mapping'] = $args[0] . ':' . $args[1];
+			$result           = $this->create( $assoc, $user_id );
+			$service          = new MappingService();
+			$row              = $service->repository()->get( (string) $args[0], (int) $args[1] );
+			$row              = $service->record_staging( $row, $this->context( $assoc ), $user_id, 'poc-draft#' . $result['post_id'] . ' readback=ok' );
+		} catch ( CaseError $e ) {
+			\WP_CLI::line( (string) wp_json_encode( array( 'ok' => false ) + $e->to_array(), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
+			\WP_CLI::halt( 1 );
+		}
+		\WP_CLI::line(
+			(string) wp_json_encode(
+				array(
+					'ok'              => true,
+					'post_id'         => $result['post_id'],
+					'readback'        => $result['readback'],
+					'mapping_status'  => $row['status'],
+					'fields_written'  => count( $result['fields_written'] ),
+				),
+				JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+			)
+		);
+	}
+
+	/**
+	 * 構造変更テスト用の複製グループの版を切り替える（A/B/C/D/E、off で無効）。
+	 *
+	 * ## OPTIONS
+	 *
+	 * <variant>
+	 * : A / B / C / D / E / off
+	 *
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function variant( array $args, array $assoc ): void {
+		$v = strtoupper( (string) $args[0] );
+		if ( 'OFF' === $v ) {
+			delete_option( AcfVariants::OPTION );
+			\WP_CLI::success( '構造変更テスト用の複製グループを無効にしました' );
+			return;
+		}
+		if ( ! in_array( $v, AcfVariants::VARIANTS, true ) ) {
+			\WP_CLI::error( 'A / B / C / D / E / off のいずれか' );
+		}
+		AcfVariants::term_id( true );
+		update_option( AcfVariants::OPTION, $v, false );
+		\WP_CLI::success( "構造変更テスト用の複製グループを版 {$v} にしました（次のコマンドから有効）" );
+	}
+
+	/**
+	 * 保存済みの合成下書きを、DBから読み直して期待値と比べる（保存時のマッピングの版で）。
 	 *
 	 * ## OPTIONS
 	 *
@@ -144,21 +215,26 @@ final class PocCommand {
 	public function verify( array $args, array $assoc ): void {
 		$post_id = (int) $args[0];
 		$this->require_poc_draft( $post_id );
-		$doc  = json_decode( (string) get_post_meta( $post_id, '_wp_ai_case_poc_doc', true ), true );
-		$hero = (string) get_post_meta( $post_id, '_wp_ai_case_poc_hero', true );
-		if ( ! is_array( $doc ) ) {
-			\WP_CLI::error( '期待値（合成ドキュメント）が保存されていません' );
+		$doc   = json_decode( (string) get_post_meta( $post_id, '_wp_ai_case_poc_doc', true ), true );
+		$hero  = (string) get_post_meta( $post_id, '_wp_ai_case_poc_hero', true );
+		$audit = get_post_meta( $post_id, DraftWriter::AUDIT_META, true );
+		if ( ! is_array( $doc ) || ! is_array( $audit ) ) {
+			\WP_CLI::error( '期待値（合成ドキュメント・保存記録）がありません' );
+		}
+		$service = new MappingService();
+		$mapping = $service->repository()->get( (string) $audit['mapping_id'], (int) $audit['mapping_version'] );
+		if ( ! $mapping ) {
+			\WP_CLI::error( '保存時のマッピングの版が見つかりません' );
 		}
 		( new CaseDocumentValidator() )->validate( $doc );
-		$built = ( new ShipWorksTemplateV11() )->build( $doc, $hero ? array( 'hero' => $hero ) : array() );
+		$built  = null;
+		$fields = ( new DraftWriter() )->translate( $doc, $mapping, $hero ? array( 'hero' => $hero ) : array(), $built );
 
 		Snapshot::flush( $post_id );
 		$inspector = new SchemaInspector();
-		$context   = $inspector->context( Plugin::POST_TYPE, $post_id );
-		$groups    = $inspector->groups( $context );
-		$index     = SchemaInspector::top_level_index( $groups );
+		$groups    = $inspector->groups( $inspector->context( Plugin::POST_TYPE, $post_id ) );
 		$registry  = new FieldAdapterRegistry();
-		$prepared  = $registry->prepare_top_level( $index, $built['fields'], array() );
+		$prepared  = $registry->prepare_top_level( SchemaInspector::top_level_index( $groups ), $fields, array() );
 
 		$rows = array();
 		foreach ( $prepared as $key => $item ) {
@@ -177,6 +253,7 @@ final class PocCommand {
 			array( 'check' => 'post_type=works', 'result' => 'works' === $post->post_type ? 'OK' : 'NG' ),
 			array( 'check' => '写真ID集合の一致', 'result' => ( array_diff( $built['image_ids'], $registry->referenced_attachments() ) || array_diff( $registry->referenced_attachments(), $built['image_ids'] ) ) ? 'NG' : 'OK' ),
 			array( 'check' => 'FV_Layout（テーマが読む形式）', 'result' => ( is_array( $fv ) && ( $fv['value'] ?? '' ) === $built['fields']['FV_Layout'] ) ? 'OK' : 'NG' ),
+			array( 'check' => 'マッピング v' . $mapping['mapping_version'] . '（' . $mapping['status'] . '）', 'result' => 'OK' ),
 		);
 		\WP_CLI\Utils\format_items( 'table', $rows, array( 'field', 'type', 'result' ) );
 		\WP_CLI\Utils\format_items( 'table', $checks, array( 'check', 'result' ) );
@@ -296,7 +373,63 @@ final class PocCommand {
 			wp_delete_attachment( $id, true );
 		}
 		delete_option( Poc::IMAGES_OPTION );
-		\WP_CLI::success( '合成データを削除しました' );
+		$term_id = AcfVariants::term_id();
+		if ( $term_id ) {
+			$repo = ( new MappingService() )->repository();
+			foreach ( $repo->all() as $row ) {
+				foreach ( (array) ( $row['document']['context_selector']['taxonomy_terms'] ?? array() ) as $term ) {
+					if ( (int) $term['term_id'] === $term_id ) {
+						$repo->delete_context( (string) $row['context_hash'] );
+						break;
+					}
+				}
+			}
+			wp_delete_term( $term_id, AcfVariants::TERM_TAX );
+		}
+		delete_option( AcfVariants::OPTION );
+		\WP_CLI::success( '合成データ（下書き・画像・試験用タームと、その文脈のマッピング）を削除しました' );
+	}
+
+	/**
+	 * @param array<string,string> $assoc
+	 * @return array<string,mixed>
+	 */
+	private function create( array $assoc, int $user_id ): array {
+		$fixture   = (string) ( $assoc['fixture'] ?? 'poc_full' );
+		$relations = array_merge( Poc::default_relations(), array_filter( array_map( 'intval', array_intersect_key( $assoc, array_flip( array( 'voice', 'staff', 'supervisor' ) ) ) ) ) );
+		$doc       = Poc::load_fixture( $fixture, $relations );
+		$options   = array(
+			'extra_meta' => array(
+				Poc::MARK                 => '1',
+				'_wp_ai_case_poc_fixture' => $fixture,
+			),
+			'terms'      => isset( $assoc['test-context'] ) ? AcfVariants::terms() : array(),
+		);
+		if ( ! empty( $assoc['hero'] ) ) {
+			$options['hero'] = (string) $assoc['hero'];
+		}
+		if ( ! empty( $assoc['mapping'] ) ) {
+			[ $id, $version ] = array_pad( explode( ':', (string) $assoc['mapping'], 2 ), 2, '0' );
+			$row              = ( new MappingService() )->repository()->get( $id, (int) $version );
+			if ( ! $row ) {
+				throw new CaseError( CaseError::MAPPING_NOT_READY, 'マッピングの版が見つかりません' );
+			}
+			$options['mapping'] = $row;
+		}
+		$result = ( new DraftWriter() )->create_from_document( $doc, $user_id, $options );
+		update_post_meta( $result['post_id'], '_wp_ai_case_poc_doc', wp_slash( wp_json_encode( $doc, JSON_UNESCAPED_UNICODE ) ) );
+		if ( ! empty( $options['hero'] ) ) {
+			update_post_meta( $result['post_id'], '_wp_ai_case_poc_hero', $options['hero'] );
+		}
+		return $result;
+	}
+
+	/**
+	 * @param array<string,string> $assoc
+	 * @return array{post_type:string,post_id:int,post_terms:array<string,int[]>}
+	 */
+	private function context( array $assoc ): array {
+		return ( new SchemaInspector() )->context( Plugin::POST_TYPE, 0, isset( $assoc['test-context'] ) ? AcfVariants::terms() : array() );
 	}
 
 	private function require_user(): int {

@@ -17,7 +17,7 @@ use WpAiCase\Support\CaseError;
 
 defined( 'ABSPATH' ) || exit;
 
-final class SchemaInspector {
+class SchemaInspector {
 
 	/** 正規化に含めるフィールド属性（保存先・型・選択肢・条件・件数に関わるもの）。 */
 	private const FIELD_ATTRS = array(
@@ -122,18 +122,95 @@ final class SchemaInspector {
 	}
 
 	/**
+	 * 適用条件の指紋：投稿タイプと「実際に適用されるグループ（key と location）」の組。
+	 * タームが違っても、適用されるグループが同じなら同じ文脈として扱う。
+	 *
 	 * @param array{post_type:string,post_id:int,post_terms:array<string,int[]>} $context
+	 * @param array<int,array<string,mixed>>                                     $groups
 	 */
-	public function context_hash( array $context ): string {
+	public function context_hash( array $context, array $groups ): string {
+		$applied = array();
+		foreach ( $groups as $group ) {
+			$applied[] = array(
+				'key'      => (string) $group['key'],
+				'location' => $group['location'] ?? array(),
+			);
+		}
+		usort( $applied, static fn( $a, $b ) => strcmp( $a['key'], $b['key'] ) );
 		return hash(
 			'sha256',
 			self::stable_json(
 				array(
-					'post_type'  => $context['post_type'],
-					'post_terms' => $context['post_terms'],
+					'post_type' => $context['post_type'],
+					'groups'    => $applied,
 				)
 			)
 		);
+	}
+
+	/**
+	 * 契約（acf_mapping.context_selector）用の表現。
+	 *
+	 * @param array{post_type:string,post_id:int,post_terms:array<string,int[]>} $context
+	 * @return array<string,mixed>
+	 */
+	public function context_selector( array $context, string $context_hash ): array {
+		$terms = array();
+		foreach ( $context['post_terms'] as $taxonomy => $ids ) {
+			foreach ( $ids as $id ) {
+				$terms[] = array(
+					'taxonomy' => (string) $taxonomy,
+					'term_id'  => (int) $id,
+				);
+			}
+		}
+		return array(
+			'post_type'                 => $context['post_type'],
+			'location_rule_fingerprint' => $context_hash,
+			'taxonomy_terms'            => $terms,
+		);
+	}
+
+	/**
+	 * 1つのフィールドの正規化（子フィールド・レイアウトは含めない）。マッピングが使うノードの変化検出に使う。
+	 *
+	 * @param array<string,mixed> $field
+	 * @return array<string,mixed>
+	 */
+	public static function canonical_attrs( array $field ): array {
+		$c = array();
+		foreach ( self::FIELD_ATTRS as $attr ) {
+			if ( array_key_exists( $attr, $field ) ) {
+				$c[ $attr ] = $field[ $attr ];
+			}
+		}
+		return $c;
+	}
+
+	/**
+	 * 有効なテーマの指紋（表示の再確認が必要かの判定用。外部へは送らない）。
+	 */
+	public static function theme_fingerprint(): string {
+		$theme = wp_get_theme();
+		$dirs  = array_unique( array( get_stylesheet_directory(), get_template_directory() ) );
+		$parts = array( $theme->get_stylesheet(), (string) $theme->get( 'Version' ) );
+		foreach ( $dirs as $dir ) {
+			$files = array();
+			$it    = new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ) );
+			foreach ( $it as $file ) {
+				if ( $file->isFile() && 'php' === strtolower( $file->getExtension() ) ) {
+					$files[] = $file->getPathname();
+				}
+			}
+			sort( $files );
+			foreach ( $files as $path ) {
+				$parts[] = substr( $path, strlen( $dir ) ) . ':' . (string) hash_file( 'sha256', $path );
+			}
+		}
+		/**
+		 * 試験用：テーマの変更を模擬する。
+		 */
+		return (string) apply_filters( 'wp_ai_case_theme_fingerprint', hash( 'sha256', implode( "\n", $parts ) ) );
 	}
 
 	/**

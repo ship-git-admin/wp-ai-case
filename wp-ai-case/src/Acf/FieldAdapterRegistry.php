@@ -46,6 +46,13 @@ final class FieldAdapterRegistry {
 	/** @var int[] prepare 中に参照した関連投稿ID */
 	private array $related_posts = array();
 
+	/**
+	 * @param bool $verify_references false なら、画像・関連先の投稿が実在するかを確かめない
+	 *                                （マッピングの構造検証で、架空のIDを使うとき専用）。
+	 */
+	public function __construct( private bool $verify_references = true ) {
+	}
+
 	public static function support_status( string $type ): string {
 		if ( in_array( $type, self::SUPPORTED, true ) ) {
 			return 'supported';
@@ -336,10 +343,12 @@ final class FieldAdapterRegistry {
 				if ( ! is_int( $value ) || $value < 1 ) {
 					throw new CaseError( CaseError::INVALID_VALUE, '画像は attachment ID（整数）で指定します', array( 'path' => $path ) );
 				}
-				if ( get_post_type( $value ) !== 'attachment' || ! wp_attachment_is_image( $value ) ) {
-					throw new CaseError( CaseError::INVALID_VALUE, '画像の添付ファイルではありません', array( 'path' => $path, 'attachment_id' => $value ) );
+				if ( $this->verify_references ) {
+					if ( get_post_type( $value ) !== 'attachment' || ! wp_attachment_is_image( $value ) ) {
+						throw new CaseError( CaseError::INVALID_VALUE, '画像の添付ファイルではありません', array( 'path' => $path, 'attachment_id' => $value ) );
+					}
+					$this->check_mime( $field, $value, $path );
 				}
-				$this->check_mime( $field, $value, $path );
 				$this->attachments[] = $value;
 				return $value;
 
@@ -384,7 +393,9 @@ final class FieldAdapterRegistry {
 					if ( ! is_int( $id ) || $id < 1 || in_array( $id, $ids, true ) ) {
 						throw new CaseError( CaseError::INVALID_VALUE, '関連付けの投稿IDが不正か重複しています', array( 'path' => $path ) );
 					}
-					$this->check_related_post( $field, $id, $path );
+					if ( $this->verify_references ) {
+						$this->check_related_post( $field, $id, $path );
+					}
 					$ids[] = $id;
 				}
 				$this->related_posts = array_merge( $this->related_posts, $ids );

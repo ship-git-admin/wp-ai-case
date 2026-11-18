@@ -22,8 +22,11 @@ final class Plugin {
 			return;
 		}
 
+		Support\Installer::maybe_install();
+
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'ai-case', Cli\Commands::class );
+			\WP_CLI::add_command( 'ai-case mapping', Cli\MappingCommand::class );
 		}
 
 		$dev_bootstrap = WP_AI_CASE_DIR . '/dev/bootstrap.php';

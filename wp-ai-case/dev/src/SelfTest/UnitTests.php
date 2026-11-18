@@ -230,7 +230,7 @@ final class UnitTests {
 			$this->t->true( in_array( '施工事例（移設）', $titles, true ), '移設グループがない' );
 			$this->t->true( ! in_array( '施工事例_ver1.1', $titles, true ), 'ver1.1 が適用されたまま' );
 			$base = $inspector->context( Plugin::POST_TYPE, 0, array() );
-			$this->t->true( $inspector->context_hash( $ctx ) !== $inspector->context_hash( $base ), 'context hash が変わらない' );
+			$this->t->true( $inspector->context_hash( $ctx, $inspector->groups( $ctx ) ) !== $inspector->context_hash( $base, $inspector->groups( $base ) ), 'context hash が変わらない' );
 		} );
 		$t->test( 'U-SCH05', '新規の施工事例に適用される定義に、未対応の型がない（対応状況の一覧）', function () use ( $inspector ) {
 			$unsupported = array();

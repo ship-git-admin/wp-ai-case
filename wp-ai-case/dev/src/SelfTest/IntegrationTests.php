@@ -11,6 +11,7 @@ use WpAiCase\Acf\SchemaInspector;
 use WpAiCase\Dev\Poc;
 use WpAiCase\Draft\DraftWriter;
 use WpAiCase\Draft\Snapshot;
+use WpAiCase\Mapping\MappingService;
 use WpAiCase\Plugin;
 use WpAiCase\Support\CaseError;
 
@@ -45,10 +46,18 @@ final class IntegrationTests {
 			return;
 		}
 
-		$writer = new DraftWriter();
-		$main   = 0;
+		$writer  = new DraftWriter();
+		$main    = 0;
+		$service = new MappingService();
+		$context = ( new SchemaInspector() )->context( Plugin::POST_TYPE, 0, array() );
+		try {
+			$mapping = $service->gate( $context );
+		} catch ( CaseError $e ) {
+			$t->test( 'I-00', '前提：この文脈の承認済みマッピング', fn() => throw new SkipTest( $e->getMessage() ) );
+			return;
+		}
 
-		$t->test( 'I-01', 'C1-A01/02 合成CaseDocument→下書き作成→保存→読み戻し一致（FV=ビフォーアフター）', function () use ( $writer, $doc, &$main ) {
+		$t->test( 'I-01', 'C1-A01/02 合成CaseDocument→下書き作成→保存→読み戻し一致（FV=ビフォーアフター）', function () use ( $writer, $mapping, $doc, &$main ) {
 			$r    = $writer->create_from_document( $doc, $this->user_id, $this->opts( array( 'hero' => 'before_after' ) ) );
 			$main = (int) $r['post_id'];
 			$this->created[] = $main;
@@ -79,7 +88,7 @@ final class IntegrationTests {
 			$this->t->true( is_array( $sup ) && 'staff' === $sup[0]->post_type, '監修者' );
 		} );
 
-		$t->test( 'I-03', 'FV=シングル固定・ギャラリーでも保存・読み戻し一致', function () use ( $writer, $doc ) {
+		$t->test( 'I-03', 'FV=シングル固定・ギャラリーでも保存・読み戻し一致', function () use ( $writer, $mapping, $doc ) {
 			foreach ( array( 'single' => 'layout01', 'gallery' => 'layout02' ) as $hero => $layout ) {
 				$r               = $writer->create_from_document( $doc, $this->user_id, $this->opts( array( 'hero' => $hero ) ) );
 				$this->created[] = (int) $r['post_id'];
@@ -89,12 +98,12 @@ final class IntegrationTests {
 			}
 		} );
 
-		$t->test( 'I-04', 'C1-A02 指定しないフィールドは保持される（一部だけ更新）', function () use ( $writer, &$main ) {
+		$t->test( 'I-04', 'C1-A02 指定しないフィールドは保持される（一部だけ更新）', function () use ( $writer, $mapping, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
 			$before = Snapshot::capture( $main );
-			$r      = $writer->write_fields( $main, array( 'EntryData_CatchTxt' => '【合成テスト】一部更新', 'Request' => '<p>【合成テスト】一部更新</p>' ), $this->user_id, (string) get_post( $main )->post_modified_gmt );
+			$r      = $writer->write_fields( $main, array( 'EntryData_CatchTxt' => '【合成テスト】一部更新', 'Request' => '<p>【合成テスト】一部更新</p>' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, $mapping );
 			$this->t->same( array( 'EntryData_CatchTxt', 'Request' ), $r['fields_written'], '書いたフィールド' );
 			$after   = Snapshot::capture( $main );
 			$changed = array();
@@ -107,25 +116,35 @@ final class IntegrationTests {
 			$this->t->same( array( 'EntryData_CatchTxt', 'Request' ), $changed, '変わったメタ' );
 		} );
 
-		$t->test( 'I-05', 'C1-A04 未対応の型が現れたら何も書かずに止まる', function () use ( $writer, &$main ) {
+		$t->test( 'I-05', 'C1-ACF09 生成の途中でACF定義が変わったら（未対応の型が現れた等）、何も書かずに止まる', function () use ( $writer, $mapping, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
-			$inspector = new SchemaInspector();
-			$groups    = $inspector->groups( $inspector->context( Plugin::POST_TYPE, $main ) );
-			foreach ( $groups as $gi => $group ) {
-				foreach ( $group['fields'] as $fi => $field ) {
-					if ( 'EntryData_CatchTxt' === $field['name'] ) {
-						$groups[ $gi ]['fields'][ $fi ]['type'] = 'google_map';
+			$change = static function ( $field ) {
+				$field['type'] = 'google_map';
+				return $field;
+			};
+			$reset  = static function (): void {
+				foreach ( array( 'fields', 'local-fields', 'values' ) as $store ) {
+					$s = acf_get_store( $store );
+					if ( $s ) {
+						$s->reset();
 					}
 				}
-			}
+			};
 			$before = Snapshot::capture( $main );
-			$this->t->throws_case( CaseError::UNSUPPORTED_FIELD_TYPE, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, null, array( 'groups_override' => $groups ) ) );
+			add_filter( 'acf/load_field/name=EntryData_CatchTxt', $change );
+			$reset();
+			try {
+				$this->t->throws_case( CaseError::SCHEMA_CHANGED, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, $mapping ) );
+			} finally {
+				remove_filter( 'acf/load_field/name=EntryData_CatchTxt', $change );
+				$reset();
+			}
 			$this->t->true( $before['meta'] == Snapshot::capture( $main )['meta'], 'メタが変わった' ); // phpcs:ignore Universal.Operators.StrictComparisons
 		} );
 
-		$t->test( 'I-06', '条件分岐で非表示の枝（FV=シングルなのにギャラリー）を拒否し、何も書かない', function () use ( $writer, &$main ) {
+		$t->test( 'I-06', '条件分岐で非表示の枝（FV=シングルなのにギャラリー）を拒否し、何も書かない', function () use ( $writer, $mapping, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
@@ -140,19 +159,20 @@ final class IntegrationTests {
 						'FV_Layout_Gallery' => array( array( 'FV_Layout_Gallery_img' => $images['after1'] ) ),
 					),
 					$this->user_id,
-					(string) get_post( $main )->post_modified_gmt
+					(string) get_post( $main )->post_modified_gmt,
+					$mapping
 				)
 			);
 			$this->t->true( $before['meta'] == Snapshot::capture( $main )['meta'], 'メタが変わった' ); // phpcs:ignore Universal.Operators.StrictComparisons
 		} );
 
-		$t->test( 'I-07', '下書き以外（非公開・公開済み）には保存しない', function () use ( $writer ) {
+		$t->test( 'I-07', '下書き以外（非公開・公開済み）には保存しない', function () use ( $writer, $mapping ) {
 			$private = wp_insert_post( array( 'post_type' => Plugin::POST_TYPE, 'post_status' => 'private', 'post_title' => '【合成テスト】非公開', 'post_author' => $this->user_id ), true );
 			$this->t->true( ! is_wp_error( $private ), '試験用の非公開投稿を作れない' );
 			$this->created[] = (int) $private;
 			update_post_meta( $private, Poc::MARK, '1' );
 			update_post_meta( $private, self::TEST_MARK, '1' );
-			$this->t->throws_case( CaseError::POST_STATE, fn() => $writer->write_fields( (int) $private, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $private )->post_modified_gmt ) );
+			$this->t->throws_case( CaseError::POST_STATE, fn() => $writer->write_fields( (int) $private, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $private )->post_modified_gmt, $mapping ) );
 			$published = get_posts( array( 'post_type' => Plugin::POST_TYPE, 'post_status' => 'publish', 'posts_per_page' => 1, 'fields' => 'ids' ) );
 			if ( $published ) {
 				// 公開済みの実記事には書き込み処理を呼ばず、事前チェックだけを確かめる。
@@ -160,39 +180,39 @@ final class IntegrationTests {
 			}
 		} );
 
-		$t->test( 'I-08', '基準版より後に更新された下書き・他人の編集中は保存しない', function () use ( $writer, &$main ) {
+		$t->test( 'I-08', '基準版より後に更新された下書き・他人の編集中は保存しない', function () use ( $writer, $mapping, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
-			$this->t->throws_case( CaseError::STALE_BASE, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, '2000-01-01 00:00:00' ) );
+			$this->t->throws_case( CaseError::STALE_BASE, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, '2000-01-01 00:00:00', $mapping ) );
 			$others = get_users( array( 'role' => 'administrator', 'exclude' => array( $this->user_id ), 'number' => 1, 'fields' => 'ID' ) );
 			if ( $others ) {
 				update_post_meta( $main, '_edit_lock', time() . ':' . (int) $others[0] );
 				try {
-					$this->t->throws_case( CaseError::POST_STATE, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt ) );
+					$this->t->throws_case( CaseError::POST_STATE, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, $mapping ) );
 				} finally {
 					delete_post_meta( $main, '_edit_lock' );
 				}
 			}
 		} );
 
-		$t->test( 'I-09', '開始時と保存直前で schema hash が違えば保存しない', function () use ( $writer, &$main ) {
+		$t->test( 'I-09', '開始時と保存直前で schema hash が違えば保存しない', function () use ( $writer, $mapping, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
-			$this->t->throws_case( CaseError::SCHEMA_CHANGED, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, str_repeat( '0', 64 ) ) );
+			$this->t->throws_case( CaseError::SCHEMA_CHANGED, fn() => $writer->write_fields( $main, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $main )->post_modified_gmt, array( 'schema_sha256' => str_repeat( '0', 64 ) ) + $mapping ) );
 		} );
 
-		$t->test( 'I-10', '保存の途中で失敗したらスナップショットへ戻す', function () use ( $writer, $doc, &$main ) {
+		$t->test( 'I-10', '保存の途中で失敗したらスナップショットへ戻す', function () use ( $writer, $mapping, $doc, &$main ) {
 			if ( ! $main ) {
 				throw new SkipTest( 'I-01 が失敗' );
 			}
-			$built  = ( new \WpAiCase\Mapping\ShipWorksTemplateV11() )->build( $doc, array( 'hero' => 'gallery' ) );
+			$fields = $writer->translate( $doc, $mapping, array( 'hero' => 'gallery' ) );
 			$before = Snapshot::capture( $main );
 			$fail   = static fn() => 3;
 			add_filter( 'wp_ai_case_test_inject_write_failure', $fail );
 			try {
-				$e = $this->t->throws_case( CaseError::WRITE_FAILED, fn() => $writer->write_fields( $main, $built['fields'], $this->user_id, (string) get_post( $main )->post_modified_gmt ) );
+				$e = $this->t->throws_case( CaseError::WRITE_FAILED, fn() => $writer->write_fields( $main, $fields, $this->user_id, (string) get_post( $main )->post_modified_gmt, $mapping ) );
 			} finally {
 				remove_filter( 'wp_ai_case_test_inject_write_failure', $fail );
 			}
@@ -202,7 +222,7 @@ final class IntegrationTests {
 			$this->t->true( null !== Snapshot::load_persisted( $main ), '手動復旧用のスナップショットが保存されていない' );
 		} );
 
-		$t->test( 'I-11', '紐付けなし（お客様の声・担当スタッフ・監修者が空）でも下書きを作り、関連付けは空のまま', function () use ( $writer, $doc ) {
+		$t->test( 'I-11', '紐付けなし（お客様の声・担当スタッフ・監修者が空）でも下書きを作り、関連付けは空のまま', function () use ( $writer, $mapping, $doc ) {
 			$none              = $doc;
 			$none['relations'] = array( 'customer_voice_post_ids' => array(), 'staff' => array(), 'supervisor_post_ids' => array() );
 			$r                 = $writer->create_from_document( $none, $this->user_id, $this->opts( array( 'hero' => 'single' ) ) );
@@ -215,7 +235,7 @@ final class IntegrationTests {
 				$this->t->true( empty( get_field( $name, $id, false ) ), "{$name} に値がある" );
 			}
 		} );
-		$t->test( 'I-12', 'お客様の声だけ紐付けなし（担当スタッフ・監修者はあり）でも保存できる', function () use ( $writer, $doc ) {
+		$t->test( 'I-12', 'お客様の声だけ紐付けなし（担当スタッフ・監修者はあり）でも保存できる', function () use ( $writer, $mapping, $doc ) {
 			$part                                         = $doc;
 			$part['relations']['customer_voice_post_ids'] = array();
 			$r                                            = $writer->create_from_document( $part, $this->user_id, $this->opts( array( 'hero' => 'single' ) ) );
@@ -223,6 +243,31 @@ final class IntegrationTests {
 			$this->t->same( 'ok', $r['readback'], '読み戻し' );
 			$this->t->true( in_array( 'EntryData_Staff', $r['fields_written'], true ) && in_array( 'entrydata_supervision', $r['fields_written'], true ), 'スタッフ・監修者を書いていない' );
 			$this->t->true( ! in_array( 'EntryData_RelatedData', $r['fields_written'], true ), 'お客様の声を書いた' );
+		} );
+		$t->test( 'I-13', '未承認のマッピングでは、合成データ以外の下書きに保存しない', function () use ( $writer, $mapping ) {
+			$id = wp_insert_post( array( 'post_type' => Plugin::POST_TYPE, 'post_status' => 'draft', 'post_title' => '【合成テスト】印なし', 'post_author' => $this->user_id ), true );
+			$this->t->true( ! is_wp_error( $id ), '試験用の下書きを作れない' );
+			$this->created[] = (int) $id;
+			update_post_meta( $id, self::TEST_MARK, '1' );
+			$candidate = array( 'status' => 'validated_local' ) + $mapping;
+			$this->t->throws_case( CaseError::MAPPING_NOT_READY, fn() => $writer->write_fields( (int) $id, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $id )->post_modified_gmt, $candidate ) );
+		} );
+
+		$t->test( 'I-14', 'C1-ACF04/07 投稿の適用条件（タクソノミー）が変わったら、その投稿には元のマッピングで保存しない', function () use ( $writer, $mapping ) {
+			$term = get_term_by( 'slug', 'old_layout', 'sys_tag' );
+			if ( ! $term ) {
+				throw new SkipTest( 'old_layout タームがありません' );
+			}
+			$id = wp_insert_post( array( 'post_type' => Plugin::POST_TYPE, 'post_status' => 'draft', 'post_title' => '【合成テスト】条件変更', 'post_author' => $this->user_id ), true );
+			$this->created[] = (int) $id;
+			update_post_meta( $id, Poc::MARK, '1' );
+			update_post_meta( $id, self::TEST_MARK, '1' );
+			wp_set_object_terms( (int) $id, array( (int) $term->term_id ), 'sys_tag' );
+			$this->t->throws_case( CaseError::SCHEMA_CHANGED, fn() => $writer->write_fields( (int) $id, array( 'EntryData_CatchTxt' => 'x' ), $this->user_id, (string) get_post( $id )->post_modified_gmt, $mapping ) );
+			$service = new MappingService();
+			$ctx     = ( new SchemaInspector() )->context( Plugin::POST_TYPE, (int) $id );
+			$this->t->same( 'no_mapping', $service->inspect( $ctx )['state'], '旧レイアウトの文脈' );
+			$this->t->same( 'ready', $service->inspect( ( new SchemaInspector() )->context( Plugin::POST_TYPE, 0, array() ) )['state'], '通常の文脈は止まらない' );
 		} );
 	}
 

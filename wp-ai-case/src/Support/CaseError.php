@@ -26,6 +26,9 @@ final class CaseError extends \RuntimeException {
 	public const SCHEMA_CHANGED         = 'schema_changed';
 	public const WRITE_FAILED           = 'write_failed';
 	public const READBACK_MISMATCH      = 'readback_mismatch';
+	public const MAPPING_NOT_READY      = 'mapping_not_ready';
+	public const INVALID_TRANSITION     = 'invalid_transition';
+	public const FORBIDDEN              = 'forbidden';
 
 	private const AI_CODES = array(
 		self::UNSUPPORTED_FIELD_TYPE => 'AI-010',
@@ -39,6 +42,9 @@ final class CaseError extends \RuntimeException {
 		self::STALE_BASE             => 'AI-012',
 		self::WRITE_FAILED           => 'AI-016',
 		self::READBACK_MISMATCH      => 'AI-016',
+		self::MAPPING_NOT_READY      => 'AI-010',
+		self::INVALID_TRANSITION     => 'AI-010',
+		self::FORBIDDEN              => 'AI-015',
 	);
 
 	/** @var string */
