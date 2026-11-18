@@ -108,6 +108,89 @@ final class DraftWriter {
 	}
 
 	/**
+	 * この機能で保存した既存の下書きを、修正後の CaseDocument に合わせて更新する。
+	 *
+	 * - 前回の保存から変わった部分（論理名）だけを書く。変わっていない部分・この機能が書かない部分は触らない。
+	 * - 書く部分を、保存後に人が編集画面で変えていたら、何も書かずに止める（人の編集を上書きしない）。
+	 * - 書く前に、修正後の文書全体を現在のACF定義で検証し、写真の集合も確かめる。
+	 *
+	 * @param array<string,mixed> $doc     修正後の CaseDocument
+	 * @param array<string,mixed> $state   DraftState::load()['state']（ジョブ開始時に読んだもの）
+	 * @param array<string,mixed> $mapping この保存を許可する承認済みの版
+	 * @return array<string,mixed> changed_slots（書いた論理名）を含む
+	 */
+	public function revise_document( int $post_id, array $doc, int $user_id, string $base_modified_gmt, array $mapping, array $state ): array {
+		( new CaseDocumentValidator() )->validate( $doc );
+		$this->guard_post( $post_id, $user_id, $base_modified_gmt );
+
+		$built   = $this->template->build( $doc );
+		$prints  = DraftState::built_prints( $built );
+		$changed = array();
+		foreach ( $prints as $slot => $print ) {
+			if ( ( $state['built'][ $slot ] ?? null ) !== $print ) {
+				$changed[] = $slot;
+			}
+		}
+		if ( ! $changed ) {
+			return array(
+				'post_id'       => $post_id,
+				'changed_slots' => array(),
+				'readback'      => 'not_needed',
+			);
+		}
+
+		$context = $this->inspector->context( Plugin::POST_TYPE, $post_id );
+		$groups  = $this->inspector->groups( $context );
+		$edited  = DraftState::edited_slots( $post_id, $state, $mapping, $groups, $changed );
+		if ( $edited ) {
+			throw new CaseError(
+				CaseError::EDITED_BY_HAND,
+				'修正する部分が、保存後に編集画面で変更されています',
+				array(
+					'post_id' => $post_id,
+					'fields'  => DraftState::labels( $edited ),
+				)
+			);
+		}
+
+		// 修正後の文書全体が現在の定義で保存できる形か、写真の集合が合っているかを先に確かめる。
+		$index = SchemaInspector::top_level_index( $groups );
+		$scope = array();
+		foreach ( $index as $field ) {
+			$scope[ $field['key'] ] = get_field( $field['key'], $post_id, false );
+		}
+		$translator = new MappingTranslator();
+		$bindings   = (array) $mapping['document']['bindings'];
+		$this->registry->prepare_top_level( $index, $translator->translate( $built['fields'], ShipWorksTemplateV11::logical_schema(), $bindings ), $scope );
+		$this->check_image_coverage( $built['image_ids'] );
+
+		// 変わった部分だけの値ツリー。値がなくなった部分は、空にできる型だけ空で書く（入力を消した操作）。
+		$logical = ShipWorksTemplateV11::logical_schema();
+		$subset  = array();
+		foreach ( $changed as $slot ) {
+			if ( DraftState::TITLE_SLOT === $slot ) {
+				continue;
+			}
+			if ( array_key_exists( $slot, $built['fields'] ) ) {
+				$subset[ $slot ] = $built['fields'][ $slot ];
+				continue;
+			}
+			$empty = match ( (string) ( $logical[ $slot ]['type'] ?? '' ) ) {
+				'text', 'textarea', 'wysiwyg' => '',
+				'flexible_content', 'repeater', 'relationship' => array(),
+				default => null, // グループ（トップの写真の各型など）は条件分岐で隠れるので触らない
+			};
+			if ( null !== $empty ) {
+				$subset[ $slot ] = $empty;
+			}
+		}
+		$fields  = $subset ? $translator->translate( $subset, $logical, $bindings ) : array();
+		$options = in_array( DraftState::TITLE_SLOT, $changed, true ) ? array( 'post_title' => (string) $built['post']['post_title'] ) : array();
+		$result  = $this->write_fields( $post_id, $fields, $user_id, $base_modified_gmt, $mapping, $options );
+		return $result + array( 'changed_slots' => $changed );
+	}
+
+	/**
 	 * CaseDocument を、マッピングを通して現在のACFの名前の値ツリーにする（保存はしない）。
 	 *
 	 * @param array<string,mixed>      $doc
@@ -126,7 +209,7 @@ final class DraftWriter {
 	 *
 	 * @param array<string,mixed> $fields  現在のACFの name => 値
 	 * @param array<string,mixed> $mapping この保存を許可するマッピングの版（開始時に取得したもの）
-	 * @param array<string,mixed> $options expected_images
+	 * @param array<string,mixed> $options expected_images, post_title（タイトルも変えるとき）
 	 * @return array<string,mixed>
 	 */
 	public function write_fields( int $post_id, array $fields, int $user_id, string $base_modified_gmt, array $mapping, array $options = array() ): array {
@@ -162,6 +245,19 @@ final class DraftWriter {
 
 		$written = 0;
 		try {
+			// タイトルは先に変える（保存時の他のフックが走った後に、ACFの値を書くため）。
+			if ( isset( $options['post_title'] ) ) {
+				$updated = wp_update_post(
+					array(
+						'ID'         => $post_id,
+						'post_title' => wp_slash( (string) $options['post_title'] ),
+					),
+					true
+				);
+				if ( is_wp_error( $updated ) || ! $updated ) {
+					throw new CaseError( CaseError::WRITE_FAILED, 'タイトルを保存できませんでした' );
+				}
+			}
 			foreach ( $prepared as $key => $item ) {
 				/**
 				 * 試験用：N件書いた時点で失敗させる（0 なら無効）。
@@ -175,6 +271,10 @@ final class DraftWriter {
 			}
 			Snapshot::flush( $post_id );
 			$mismatches = $this->readback( $post_id, $prepared );
+			// 権限によってはタイトルの記号が実体参照で保存されるので、文字に戻して比べる。
+			if ( isset( $options['post_title'] ) && html_entity_decode( (string) get_post( $post_id )->post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) !== html_entity_decode( (string) $options['post_title'], ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) {
+				$mismatches[] = 'post_title';
+			}
 			if ( $mismatches ) {
 				throw new CaseError( CaseError::READBACK_MISMATCH, '保存後の読み戻しが一致しません', array( 'fields' => $mismatches ) );
 			}

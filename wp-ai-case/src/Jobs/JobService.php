@@ -9,6 +9,9 @@
  * - 取消し・再試行で世代（job_generation）を上げ、古い呼び出しの結果は捨てる。
  * - 下書き保存は、開始時に記録したマッピングの版が今も有効で、ACF定義が同じときだけ。
  *
+ * 既存の下書きの修正（mode=revise_draft）は、この機能で保存した下書きだけが対象。開いた時点の文書から始め、
+ * 保存では前回から変わった部分だけを書く（人が編集画面で変えた部分に重なる修正は保存しない）。
+ *
  * 新規作成枠（月5件）・費用の上限は C1-D で追加する。
  *
  * @package WpAiCase
@@ -23,6 +26,8 @@ use WpAiCase\Diagnostics\ErrorClassifier;
 use WpAiCase\Diagnostics\PreflightService;
 use WpAiCase\Diagnostics\SafeErrorPresenter;
 use WpAiCase\Diagnostics\Settings;
+use WpAiCase\Domain\CaseDocumentValidator;
+use WpAiCase\Draft\DraftState;
 use WpAiCase\Draft\DraftWriter;
 use WpAiCase\Mapping\MappingService;
 use WpAiCase\Plugin;
@@ -56,6 +61,9 @@ final class JobService {
 	 * @return array<string,mixed>
 	 */
 	public function create( array $raw, int $user ): array {
+		if ( 'revise_draft' === ( $raw['mode'] ?? 'create' ) ) {
+			return $this->open_draft( $raw, $user );
+		}
 		$pre = PreflightService::check( $user, true );
 		if ( ! $pre['ok'] ) {
 			throw new JobError( $pre['error'], 'AI-015' === $pre['code'] ? 403 : 503 );
@@ -100,6 +108,151 @@ final class JobService {
 				'error'     => null,
 			)
 		);
+	}
+
+	/**
+	 * 既存の下書きを修正のために開く（外部への通信なし）。開いた時点の文書が最初の版になる。
+	 *
+	 * @param array<string,mixed> $raw case_input（mode=revise_draft, post_id, base_version）
+	 * @return array<string,mixed>
+	 */
+	public function open_draft( array $raw, int $user ): array {
+		$key     = (string) ( $raw['idempotency_key'] ?? '' );
+		$post_id = (int) ( $raw['post_id'] ?? 0 );
+		$base    = (int) ( $raw['base_version'] ?? 0 );
+		if ( ! wp_is_uuid( $key, 4 ) || 'works' !== ( $raw['post_type'] ?? 'works' ) || $post_id < 1 || $base < 1 ) {
+			throw JobError::code( 'AI-017', 'revise_input_invalid', 400 );
+		}
+		if ( true !== ( $raw['consent_external_ai'] ?? null ) ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'revise_consent_missing' ), 400, array( 'fields' => array( 'consent_external_ai' ) ) );
+		}
+		$existing = $this->repo->by_idempotency( $key );
+		if ( $existing ) {
+			if ( (int) $existing['user_id'] !== $user ) {
+				throw JobError::code( 'AI-012', 'idempotency_conflict', 409 );
+			}
+			return $existing;
+		}
+		$post = get_post( $post_id );
+		if ( ! $post || Plugin::POST_TYPE !== $post->post_type || 'draft' !== $post->post_status || ! user_can( $user, 'edit_post', $post_id ) ) {
+			throw JobError::code( 'AI-012', 'revise_not_draft', 409 );
+		}
+		$saved = DraftState::load( $post_id );
+		if ( ! $saved ) {
+			throw JobError::code( 'AI-012', 'revise_not_ai_draft', 409 );
+		}
+		if ( DraftState::version( $post_id ) !== $base ) {
+			throw JobError::code( 'AI-012', 'revise_stale_version', 409 );
+		}
+		try {
+			( new CaseDocumentValidator() )->validate( $saved['doc'] );
+		} catch ( CaseError $e ) {
+			throw JobError::code( 'AI-016', 'revise_document_invalid', 409 );
+		}
+		$images  = array();
+		$missing = array();
+		foreach ( $saved['doc']['images'] as $img ) {
+			$id = (int) $img['attachment_id'];
+			if ( get_post_type( $id ) !== 'attachment' || ! wp_attachment_is_image( $id ) ) {
+				$missing[] = '写真（ID: ' . $id . '）がメディアから削除されています';
+				continue;
+			}
+			$images[] = array(
+				'attachment_id'     => $id,
+				'original_position' => (int) $img['original_position'],
+				'caption'           => (string) ( $img['caption'] ?? '' ),
+				'user_phase_hint'   => (string) $img['phase'],
+			);
+		}
+		if ( $missing ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'revise_image_missing', array( 'post_id' => $post_id ) ), 409, array( 'fields' => $missing ) );
+		}
+		$inspector = new SchemaInspector();
+		$context   = $inspector->context( Plugin::POST_TYPE, $post_id );
+		try {
+			$mapping = $this->mappings->gate( $context );
+		} catch ( CaseError $e ) {
+			throw JobError::from_case( $e, 'mapping_not_ready', 503 );
+		}
+		$edited = DraftState::edited_slots( $post_id, $saved['state'], $mapping, $inspector->groups( $context ) );
+		return $this->repo->insert(
+			$key,
+			$user,
+			'revise_draft',
+			array(
+				'input'     => array(
+					'mode'                => 'revise_draft',
+					'post_id'             => $post_id,
+					'base_version'        => $base,
+					'images'              => $images,
+					'consent_external_ai' => true,
+				),
+				'snapshot'  => array(
+					'mapping_id'        => (string) $mapping['mapping_id'],
+					'mapping_version'   => (int) $mapping['mapping_version'],
+					'schema_sha256'     => (string) $mapping['schema_sha256'],
+					'context_hash'      => (string) $mapping['context_hash'],
+					'post_modified_gmt' => (string) $post->post_modified_gmt,
+					'doc_version'       => $base,
+				),
+				'target'    => array(
+					'title'         => html_entity_decode( get_the_title( $post ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
+					'edited'        => DraftState::labels( $edited ),
+					'was_published' => '0000-00-00 00:00:00' !== (string) $post->post_date_gmt,
+				),
+				'step'      => 0,
+				'analysis'  => array(),
+				'versions'  => array( $saved['doc'] ),
+				'index'     => 0,
+				'provider'  => array( 'state' => 'none' ),
+				'questions' => array(),
+				'usage'     => array( 'input_tokens' => 0, 'output_tokens' => 0, 'calls' => 0 ),
+				'error'     => null,
+			),
+			'proposal_ready',
+			$post_id
+		);
+	}
+
+	/**
+	 * 修正できる下書き（この機能で保存した、自分が編集できる施工事例の下書き）。新しい順に最大50件。
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function list_drafts( int $user ): array {
+		$ids = get_posts(
+			array(
+				'post_type'      => Plugin::POST_TYPE,
+				'post_status'    => 'draft',
+				'posts_per_page' => 50,
+				'orderby'        => 'modified',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+				'meta_key'       => DraftState::META_STATE, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			)
+		);
+		$out = array();
+		foreach ( $ids as $id ) {
+			$id   = (int) $id;
+			$post = get_post( $id );
+			if ( ! $post || ! user_can( $user, 'edit_post', $id ) ) {
+				continue;
+			}
+			$saved = DraftState::load( $id );
+			if ( ! $saved ) {
+				continue;
+			}
+			$out[] = array(
+				'post_id'        => $id,
+				'title'          => html_entity_decode( get_the_title( $post ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
+				'modified'       => (string) get_post_modified_time( 'Y-m-d H:i', false, $post ),
+				'version'        => DraftState::version( $id ),
+				'edited_in_editor' => (string) $post->post_modified_gmt !== (string) ( $saved['state']['post_modified_gmt'] ?? '' ),
+				'was_published'  => '0000-00-00 00:00:00' !== (string) $post->post_date_gmt,
+				'edit_url'       => (string) get_edit_post_link( $id, 'raw' ),
+			);
+		}
+		return $out;
 	}
 
 	/**
@@ -327,26 +480,67 @@ final class JobService {
 		$job     = $this->editable( $job_id, $user, $base_index );
 		$job     = $this->repo->compare_and_set( $job, array( 'status' => 'saving' ) );
 		$data    = $job['data'];
+		$doc     = $data['versions'][ $base_index ];
 		$mapping = $this->mappings->repository()->get( (string) $data['snapshot']['mapping_id'], (int) $data['snapshot']['mapping_version'] );
+		$revise  = 'revise_draft' === $job['mode'];
 		try {
 			if ( ! $mapping || 'approved_active' !== $mapping['status'] ) {
 				throw new CaseError( CaseError::MAPPING_NOT_READY, '生成を始めた後にマッピングが変わりました' );
 			}
-			$result = ( new DraftWriter() )->create_from_document(
-				$data['versions'][ $base_index ],
-				$user,
-				array(
-					'mapping'    => $mapping,
-					'extra_meta' => array( self::META_JOB => $job_id ),
-				)
-			);
+			if ( $revise ) {
+				$result = $this->save_revision( $data, $doc, $user, $mapping );
+			} else {
+				$result = ( new DraftWriter() )->create_from_document(
+					$doc,
+					$user,
+					array(
+						'mapping'    => $mapping,
+						'extra_meta' => array( self::META_JOB => $job_id ),
+					)
+				);
+				$inspector = new SchemaInspector();
+				DraftState::record( (int) $result['post_id'], $doc, $mapping, $inspector->groups( $inspector->context( Plugin::POST_TYPE, (int) $result['post_id'] ) ), 1, $user );
+			}
 		} catch ( CaseError $e ) {
 			$data['error'] = SafeErrorPresenter::from_case_error( $e, 'customer', 'save_failed' );
-			$this->repo->compare_and_set( $job, array( 'status' => 'proposal_ready', 'data' => $data, 'post_id' => isset( $e->context['post_id'] ) ? (int) $e->context['post_id'] : null ) );
-			throw new JobError( $data['error'], in_array( $e->reason, array( CaseError::MAPPING_NOT_READY, CaseError::SCHEMA_CHANGED ), true ) ? 503 : 409 );
+			$this->repo->compare_and_set( $job, array( 'status' => 'proposal_ready', 'data' => $data, 'post_id' => $revise ? (int) $data['input']['post_id'] : ( isset( $e->context['post_id'] ) ? (int) $e->context['post_id'] : null ) ) );
+			$fields = CaseError::EDITED_BY_HAND === $e->reason ? array( 'fields' => array_values( array_map( 'strval', (array) ( $e->context['fields'] ?? array() ) ) ) ) : array();
+			throw new JobError( $data['error'], in_array( $e->reason, array( CaseError::MAPPING_NOT_READY, CaseError::SCHEMA_CHANGED ), true ) ? 503 : 409, $fields );
 		}
-		$data['error'] = null;
+		$data['error']         = null;
+		$data['saved_changes'] = $revise ? DraftState::labels( (array) ( $result['changed_slots'] ?? array() ) ) : null;
 		return $this->repo->compare_and_set( $job, array( 'status' => 'committed', 'post_id' => (int) $result['post_id'], 'data' => $data ) );
+	}
+
+	/**
+	 * 既存の下書きへの保存。版を先に1つ進めて（同時に2つの画面から保存されても後の方は止まる）、
+	 * 変わった部分だけを書き、保存後の状態を記録する。
+	 *
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $doc
+	 * @param array<string,mixed> $mapping
+	 * @return array<string,mixed>
+	 */
+	private function save_revision( array $data, array $doc, int $user, array $mapping ): array {
+		$post_id = (int) $data['input']['post_id'];
+		$from    = (int) $data['snapshot']['doc_version'];
+		$saved   = DraftState::load( $post_id );
+		if ( ! $saved || ! DraftState::claim( $post_id, $from ) ) {
+			throw new CaseError( CaseError::STALE_BASE, '別の画面での修正が先に保存されました', array( 'post_id' => $post_id ) );
+		}
+		try {
+			$result = ( new DraftWriter() )->revise_document( $post_id, $doc, $user, (string) $data['snapshot']['post_modified_gmt'], $mapping, $saved['state'] );
+		} catch ( \Throwable $e ) {
+			DraftState::release( $post_id, $from );
+			throw $e;
+		}
+		if ( ! $result['changed_slots'] ) {
+			DraftState::release( $post_id, $from );
+			return $result;
+		}
+		$inspector = new SchemaInspector();
+		DraftState::record( $post_id, $doc, $mapping, $inspector->groups( $inspector->context( Plugin::POST_TYPE, $post_id ) ), $from + 1, $user );
+		return $result;
 	}
 
 	/**
@@ -383,6 +577,9 @@ final class JobService {
 			'images'          => $imgs,
 			'input'           => $data['input'] ?? null,
 			'post_id'         => $post ?: null,
+			'mode'            => (string) $job['mode'],
+			'target'          => $data['target'] ?? null,
+			'saved_changes'   => $data['saved_changes'] ?? null,
 			'edit_url'        => $post && user_can( $user, 'edit_post', $post ) ? (string) get_edit_post_link( $post, 'raw' ) : null,
 			'preview_url'     => $post ? (string) get_preview_post_link( $post ) : null,
 			'expires_at'      => $job['expires_at'],

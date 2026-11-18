@@ -23,26 +23,28 @@ final class JobRepository {
 	 * @param array<string,mixed> $data
 	 * @return array<string,mixed>
 	 */
-	public function insert( string $idempotency_key, int $user_id, string $mode, array $data ): array {
+	public function insert( string $idempotency_key, int $user_id, string $mode, array $data, string $status = 'queued', ?int $post_id = null ): array {
 		global $wpdb;
 		$now    = current_time( 'mysql', true );
 		$job_id = wp_generate_uuid4();
-		$ok     = $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-			Installer::jobs_table(),
-			array(
-				'job_id'          => $job_id,
-				'idempotency_key' => $idempotency_key,
-				'user_id'         => $user_id,
-				'mode'            => $mode,
-				'status'          => 'queued',
-				'job_generation'  => 1,
-				'data'            => (string) wp_json_encode( $data, JSON_UNESCAPED_UNICODE ),
-				'created_at'      => $now,
-				'updated_at'      => $now,
-				'expires_at'      => gmdate( 'Y-m-d H:i:s', time() + self::TTL ),
-			),
-			array( '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' )
+		$row    = array(
+			'job_id'          => $job_id,
+			'idempotency_key' => $idempotency_key,
+			'user_id'         => $user_id,
+			'mode'            => $mode,
+			'status'          => $status,
+			'job_generation'  => 1,
+			'data'            => (string) wp_json_encode( $data, JSON_UNESCAPED_UNICODE ),
+			'created_at'      => $now,
+			'updated_at'      => $now,
+			'expires_at'      => gmdate( 'Y-m-d H:i:s', time() + self::TTL ),
 		);
+		$format = array( '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' );
+		if ( null !== $post_id ) {
+			$row['post_id'] = $post_id;
+			$format[]       = '%d';
+		}
+		$ok = $wpdb->insert( Installer::jobs_table(), $row, $format ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
 		if ( ! $ok ) {
 			// 同じ idempotency_key の同時作成など。既存を返す側で処理する。
 			$existing = $this->by_idempotency( $idempotency_key );

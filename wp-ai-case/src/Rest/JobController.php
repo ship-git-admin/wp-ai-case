@@ -27,6 +27,7 @@ final class JobController {
 		$perm = array( self::class, 'can_use' );
 		register_rest_route( RestController::NS, '/form-options', array( 'methods' => 'GET', 'callback' => array( self::class, 'form_options' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs', array( 'methods' => 'POST', 'callback' => array( self::class, 'create' ), 'permission_callback' => $perm ) );
+		register_rest_route( RestController::NS, '/drafts', array( 'methods' => 'GET', 'callback' => array( self::class, 'drafts' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs/' . self::UUID, array( 'methods' => 'GET', 'callback' => array( self::class, 'show' ), 'permission_callback' => $perm ) );
 		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save' ) as $action ) {
 			register_rest_route( RestController::NS, '/jobs/' . self::UUID . '/' . $action, array( 'methods' => 'POST', 'callback' => array( self::class, $action ), 'permission_callback' => $perm ) );
@@ -65,6 +66,13 @@ final class JobController {
 			'staff'      => $list( 'staff' ),
 			'sections'   => PatchApplier::SECTIONS,
 		);
+	}
+
+	/**
+	 * 修正できる下書きの一覧（この機能で保存した、自分が編集できる下書き）。
+	 */
+	public static function drafts(): \WP_REST_Response {
+		return new \WP_REST_Response( array( 'drafts' => JobService::list_drafts( get_current_user_id() ) ) );
 	}
 
 	public static function create( \WP_REST_Request $r ) {

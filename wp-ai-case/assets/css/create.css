@@ -38,3 +38,8 @@
 }
 /* 600px 以下では管理バーが固定されないので、上端に付ける */
 @media (max-width: 600px) { .wpaic-toolbar { top: 0; } }
+.wpaic-modes .button { margin-right: 4px; }
+.wpaic-draft-list { margin: 12px 0; padding: 0; list-style: none; max-width: 900px; }
+.wpaic-draft { background: #fff; border: 1px solid #dcdcde; padding: 10px 12px; margin: 8px 0; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.wpaic-draft p { margin: 0; }
+.wpaic-draft-notes { margin: 4px 0 0 1.2em; list-style: disc; color: #8a6100; font-size: 12px; }

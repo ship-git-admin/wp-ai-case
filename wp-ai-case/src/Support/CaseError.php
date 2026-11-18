@@ -29,6 +29,7 @@ final class CaseError extends \RuntimeException {
 	public const MAPPING_NOT_READY      = 'mapping_not_ready';
 	public const INVALID_TRANSITION     = 'invalid_transition';
 	public const FORBIDDEN              = 'forbidden';
+	public const EDITED_BY_HAND         = 'edited_by_hand';
 
 	private const AI_CODES = array(
 		self::UNSUPPORTED_FIELD_TYPE => 'AI-010',
@@ -45,6 +46,7 @@ final class CaseError extends \RuntimeException {
 		self::MAPPING_NOT_READY      => 'AI-010',
 		self::INVALID_TRANSITION     => 'AI-010',
 		self::FORBIDDEN              => 'AI-015',
+		self::EDITED_BY_HAND         => 'AI-012',
 	);
 
 	/** @var string */

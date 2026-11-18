@@ -8,7 +8,11 @@
 
 namespace WpAiCase\Dev\SelfTest;
 
+use WpAiCase\Acf\SchemaInspector;
 use WpAiCase\Dev\MockProvider;
+use WpAiCase\Draft\DraftState;
+use WpAiCase\Draft\Snapshot;
+use WpAiCase\Mapping\MappingService;
 use WpAiCase\Dev\Poc;
 use WpAiCase\Diagnostics\ProviderProbe;
 use WpAiCase\Diagnostics\Settings;
@@ -270,7 +274,10 @@ final class JobTests {
 			$audit = get_post_meta( $post->ID, '_wp_ai_case_last_write', true );
 			$this->t->same( array( 'ok', $job['data']['snapshot']['mapping_id'] ), array( $audit['readback'] ?? null, $audit['mapping_id'] ?? null ), '読み戻し・マッピング' );
 			$this->t->same( 409, $this->err( fn() => $s->save( $job['job_id'], $this->user, 2 ) )->status, '保存後は再保存できない' );
+			$state['post_id'] = (int) $post->ID;
 		} );
+
+		$this->revise_tests( $state );
 
 		$t->test( 'J-09', 'C1-CON02 解析中に取り消したら、戻ってきた結果は捨てる（保存も版も作らない）', function () use ( $images ) {
 			$s   = $this->service();
@@ -412,6 +419,237 @@ final class JobTests {
 		} );
 
 		$this->t->test( 'J-16', '試験中に Claude API への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
+	}
+
+	/**
+	 * 既存の下書きの修正（mode=revise_draft）。J-08 で保存した下書きを使う。
+	 *
+	 * @param array<string,mixed> $state
+	 */
+	private function revise_tests( array &$state ): void {
+		$t    = $this->t;
+		$post = (int) ( $state['post_id'] ?? 0 );
+		$open = function ( int $base, array $override = array() ) use ( &$post ): array {
+			$job          = $this->service()->create(
+				array_replace(
+					array(
+						'client_case_id'      => 'selftest-rev',
+						'idempotency_key'     => wp_generate_uuid4(),
+						'mode'                => 'revise_draft',
+						'post_type'           => 'works',
+						'post_id'             => $post,
+						'base_version'        => $base,
+						'consent_external_ai' => true,
+					),
+					$override
+				),
+				$this->user
+			);
+			$this->jobs[] = $job['job_id'];
+			return $job;
+		};
+		$meta = static function ( int $id ): array {
+			$m = Snapshot::capture( $id )['meta'];
+			return $m;
+		};
+		$diff = static function ( array $a, array $b ): array {
+			$keys = array_unique( array_merge( array_keys( $a ), array_keys( $b ) ) );
+			return array_values( array_filter( $keys, static fn( $k ) => ( $a[ $k ] ?? null ) != ( $b[ $k ] ?? null ) ) ); // phpcs:ignore Universal.Operators.StrictComparisons
+		};
+		$field_key = static function ( int $id, string $slot ): string {
+			$inspector = new SchemaInspector();
+			$context   = $inspector->context( Plugin::POST_TYPE, $id );
+			$mapping   = ( new MappingService() )->gate( $context );
+			return (string) DraftState::slot_fields( $mapping, $inspector->groups( $context ) )[ $slot ]['key'];
+		};
+
+		$t->test( 'J-20', 'C1-UI07 修正できるのはこの機能で保存した下書きだけ。版の不一致・同意なし・手作業の下書きは開けない（外部0）', function () use ( &$post, $open ) {
+			if ( ! $post ) {
+				throw new SkipTest( 'J-08 が失敗' );
+			}
+			MockProvider::$calls = 0;
+			$this->t->same( 1, DraftState::version( $post ), '保存時の版' );
+			$listed = array_column( JobService::list_drafts( $this->user ), 'version', 'post_id' );
+			$this->t->same( 1, $listed[ $post ] ?? null, '一覧に版1で出る' );
+			$this->t->same( 'AI-012', $this->err( fn() => $open( 2 ) )->response['error_code'], '版の不一致' );
+			$e = $this->err( fn() => $open( 1, array( 'consent_external_ai' => false ) ) );
+			$this->t->same( array( 'AI-017', array( 'consent_external_ai' ) ), array( $e->response['error_code'], $e->extra['fields'] ?? array() ), '同意なし' );
+			$plain = wp_insert_post( array( 'post_type' => 'works', 'post_status' => 'draft', 'post_title' => '【試験】手作業の下書き' ) );
+			try {
+				$this->t->true( ! isset( array_column( JobService::list_drafts( $this->user ), 'post_id', 'post_id' )[ $plain ] ), '手作業の下書きは一覧に出ない' );
+				$this->t->same( 'AI-012', $this->err( fn() => $open( 1, array( 'post_id' => $plain ) ) )->response['error_code'], '手作業の下書き' );
+			} finally {
+				wp_delete_post( $plain, true );
+			}
+			$this->t->same( 0, MockProvider::$calls, '外部呼び出し' );
+		} );
+
+		$t->test( 'J-21', '下書きを開く（最初の版＝保存時の文書）→ 画面で修正 → 保存で、変わった部分（タイトル・SEO H1）だけ書く', function () use ( &$post, $open, $meta, $diff ) {
+			if ( ! $post ) {
+				throw new SkipTest( 'J-08 が失敗' );
+			}
+			$saved = DraftState::load( $post );
+			$job   = $open( 1 );
+			$this->t->same( array( 'proposal_ready', 'revise_draft', 1, $post ), array( $job['status'], $job['mode'], count( $job['data']['versions'] ), (int) $job['post_id'] ), '開いた状態' );
+			$this->t->same( $saved['doc'], $job['data']['versions'][0], '最初の版は保存時の文書' );
+			$this->t->same( array(), $job['data']['target']['edited'], '人の編集なし' );
+			$before = $meta( $post );
+			$s      = $this->service();
+			$job    = $s->revise_local( $job['job_id'], $this->user, 0, array( 'title', 'seo' ), array(
+				array( 'op' => 'text_set', 'section' => 'title', 'value' => '【試験】修正したタイトル' ),
+				array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'h1', 'value' => '【試験】修正したH1' ),
+			) );
+			$job = $s->save( $job['job_id'], $this->user, 1 );
+			$this->t->same( 'committed', $job['status'], '状態' );
+			$this->t->same( array( 'タイトル', 'SEO：H1' ), $job['data']['saved_changes'], '更新した部分' );
+			$changed = $diff( $before, $meta( $post ) );
+			$this->t->same( array( 'h1' ), $changed, '変わったメタは H1 だけ' );
+			$p = get_post( $post );
+			$this->t->same( array( '【試験】修正したタイトル', 'draft', 2 ), array( $p->post_title, $p->post_status, DraftState::version( $post ) ), 'タイトル・下書きのまま・版2' );
+		} );
+
+		$t->test( 'J-22', '保存後に編集画面で変えた部分に重なる修正は保存しない（AI-012・部分名）。重ならない修正は保存でき、人の編集は残る', function () use ( &$post, $open, $field_key ) {
+			if ( ! $post || DraftState::version( $post ) !== 2 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			$key = $field_key( $post, 'EntryData_CatchTxt' );
+			update_field( $key, '【試験】人が直した見出し', $post );
+			$job = $open( 2 );
+			$this->t->same( array( 'コンセプト（見出し）' ), $job['data']['target']['edited'], '人が変えた部分の案内' );
+			$s   = $this->service();
+			$job = $s->revise_local( $job['job_id'], $this->user, 0, array( 'concept' ), array( array( 'op' => 'text_set', 'section' => 'concept', 'value' => '【試験】AI側の見出し' ) ) );
+			$e   = $this->err( fn() => $s->save( $job['job_id'], $this->user, 1 ) );
+			$this->t->same( array( 409, 'AI-012' ), array( $e->status, $e->response['error_code'] ), '保存しない' );
+			$this->t->same( array( 'コンセプト（見出し）' ), $e->extra['fields'] ?? array(), '部分名' );
+			Snapshot::flush( $post );
+			$this->t->same( '【試験】人が直した見出し', get_field( $key, $post, false ), '人の編集は残る' );
+			$this->t->same( 2, DraftState::version( $post ), '版は進まない' );
+
+			$job = $open( 2 );
+			$job = $s->revise_local( $job['job_id'], $this->user, 0, array( 'seo' ), array( array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'description', 'value' => '【試験】説明文' ) ) );
+			$job = $s->save( $job['job_id'], $this->user, 1 );
+			$this->t->same( array( 'committed', array( 'SEO：説明文' ) ), array( $job['status'], $job['data']['saved_changes'] ), '重ならない修正は保存' );
+			Snapshot::flush( $post );
+			$this->t->same( '【試験】人が直した見出し', get_field( $key, $post, false ), '人の編集は残る（保存後も）' );
+			$this->t->same( 3, DraftState::version( $post ), '版3' );
+		} );
+
+		$t->test( 'J-23', '同じ下書きを2つの画面で開いたら、先に保存した方だけ通る（後は AI-012）', function () use ( &$post, $open ) {
+			if ( ! $post || DraftState::version( $post ) !== 3 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			$s = $this->service();
+			$a = $open( 3 );
+			$b = $open( 3 );
+			$a = $s->revise_local( $a['job_id'], $this->user, 0, array( 'seo' ), array( array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'keywords', 'value' => '試験A' ) ) );
+			$b = $s->revise_local( $b['job_id'], $this->user, 0, array( 'seo' ), array( array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'title', 'value' => '試験B' ) ) );
+			$this->t->same( 'committed', $s->save( $a['job_id'], $this->user, 1 )['status'], '先に保存' );
+			$e = $this->err( fn() => $s->save( $b['job_id'], $this->user, 1 ) );
+			$this->t->same( array( 409, 'AI-012' ), array( $e->status, $e->response['error_code'] ), '後から保存' );
+			$this->t->same( 4, DraftState::version( $post ), '版4' );
+		} );
+
+		$t->test( 'J-24', 'C1-CON01 修正中に編集画面で保存された・下書きでなくなったら保存しない。下書き以外は一覧に出ない', function () use ( &$post, $open ) {
+			if ( ! $post || DraftState::version( $post ) !== 4 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			global $wpdb;
+			$s   = $this->service();
+			$job = $open( 4 );
+			$job = $s->revise_local( $job['job_id'], $this->user, 0, array( 'seo' ), array( array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'keywords', 'value' => '試験C' ) ) );
+			$orig = get_post( $post );
+			$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => '2001-01-01 00:00:00' ), array( 'ID' => $post ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			clean_post_cache( $post );
+			$e = $this->err( fn() => $s->save( $job['job_id'], $this->user, 1 ) );
+			$this->t->same( 'AI-012', $e->response['error_code'], '編集画面で保存された' );
+			$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => $orig->post_modified_gmt, 'post_status' => 'private' ), array( 'ID' => $post ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			clean_post_cache( $post );
+			try {
+				$this->t->true( ! isset( array_column( JobService::list_drafts( $this->user ), 'post_id', 'post_id' )[ $post ] ), '非公開は一覧に出ない' );
+				$this->t->same( 'AI-012', $this->err( fn() => $open( 4 ) )->response['error_code'], '非公開は開けない' );
+				$job2 = $open( 4, array( 'post_id' => $post, 'idempotency_key' => wp_generate_uuid4() ) );
+			} catch ( JobError $e2 ) {
+				$job2 = null;
+			} finally {
+				$wpdb->update( $wpdb->posts, array( 'post_status' => 'draft' ), array( 'ID' => $post ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				clean_post_cache( $post );
+			}
+			$this->t->same( null, $job2, '非公開のまま開けた' );
+			$this->t->same( 4, DraftState::version( $post ), '版は進まない' );
+		} );
+
+		$t->test( 'J-25', 'AIで修正（選んだ部分だけ）と写真の工程変更 → 保存で、タイトルと本文・写真の欄だけ更新。ご要望・施工概要・SEOなどは不変', function () use ( &$post, $open, $meta, $diff ) {
+			if ( ! $post || DraftState::version( $post ) !== 4 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			MockProvider::$calls = 0;
+			$s   = $this->service();
+			$job = $open( 4 );
+			$doc = $job['data']['versions'][0];
+			$job = $s->revise_ai( $job['job_id'], $this->user, 0, array( 'title' ), 'タイトルを分かりやすく' );
+			$img = null;
+			foreach ( $doc['images'] as $i ) {
+				if ( 'during' === $i['phase'] ) {
+					$img = (int) $i['attachment_id'];
+				}
+			}
+			if ( ! $img ) {
+				throw new SkipTest( '施工中の写真がない' );
+			}
+			$job    = $s->revise_local( $job['job_id'], $this->user, 1, array( 'before_after' ), array( array( 'op' => 'image_phase_set', 'section' => 'before_after', 'attachment_id' => $img, 'phase' => 'after' ) ) );
+			$before = $meta( $post );
+			$job    = $s->save( $job['job_id'], $this->user, 2 );
+			$this->t->same( 1, MockProvider::$calls, 'AI呼び出しは修正の1回' );
+			// 施工中の写真が施工後になると、トップのビフォーアフターの「後」の写真も変わる。
+			$this->t->same( array( 'committed', array( 'タイトル', 'トップの写真（ビフォーアフター）', '本文と写真' ) ), array( $job['status'], $job['data']['saved_changes'] ), '更新した部分' );
+			$changed = $diff( $before, $meta( $post ) );
+			$this->t->true( ! array_intersect( $changed, array( 'Request', 'Proposal', 'Outline', 'EntryData_CatchTxt', 'EntryData_Description', 'title', 'h1', 'description', 'keywords', 'EntryData_RelatedData', 'EntryData_Staff' ) ), '選んでいない欄は不変（' . implode( ',', array_slice( $changed, 0, 8 ) ) . '）' );
+			$this->t->true( str_starts_with( get_post( $post )->post_title, '【修正】' ), 'タイトルはAIの修正' );
+			$this->t->same( 5, DraftState::version( $post ), '版5' );
+		} );
+
+		$t->test( 'J-26', '変更がなければ書き換えない（版も進めない）', function () use ( &$post, $open, $meta ) {
+			if ( ! $post || DraftState::version( $post ) !== 5 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			$before = $meta( $post );
+			$job    = $this->service()->save( $open( 5 )['job_id'], $this->user, 0 );
+			$this->t->same( array( 'committed', array() ), array( $job['status'], $job['data']['saved_changes'] ), '変更なし' );
+			$this->t->same( $before, $meta( $post ), 'メタは不変' );
+			$this->t->same( 5, DraftState::version( $post ), '版は進まない' );
+		} );
+
+		$t->test( 'J-28', '入力を消した項目（使用商材）は、下書きの欄も空にする', function () use ( &$post, $open, $field_key ) {
+			if ( ! $post || DraftState::version( $post ) !== 5 ) {
+				throw new SkipTest( '前の試験が失敗' );
+			}
+			$s   = $this->service();
+			$key = $field_key( $post, 'EntryData_Commodity' );
+			$job = $s->revise_local( $open( 5 )['job_id'], $this->user, 0, array( 'facts' ), array( array( 'op' => 'fact_set', 'section' => 'facts', 'fact_key' => 'materials', 'value' => '【試験】塗料A', 'source' => 'user_input' ) ) );
+			$s->save( $job['job_id'], $this->user, 1 );
+			Snapshot::flush( $post );
+			$this->t->same( '【試験】塗料A', get_field( $key, $post, false ), '書いた' );
+			$job = $s->revise_local( $open( 6 )['job_id'], $this->user, 0, array( 'facts' ), array( array( 'op' => 'fact_set', 'section' => 'facts', 'fact_key' => 'materials', 'value' => '', 'source' => 'user_input' ) ) );
+			$job = $s->save( $job['job_id'], $this->user, 1 );
+			Snapshot::flush( $post );
+			$this->t->same( array( array( '使用商材・建材' ), '' ), array( $job['data']['saved_changes'], (string) get_field( $key, $post, false ) ), '空にした' );
+			$this->t->same( 7, DraftState::version( $post ), '版7' );
+		} );
+
+		$t->test( 'J-27', 'REST：修正できる下書きの一覧は、ログインした編集者だけ', function () use ( &$post ) {
+			if ( ! $post ) {
+				throw new SkipTest( 'J-08 が失敗' );
+			}
+			$r = rest_do_request( new \WP_REST_Request( 'GET', '/wp-ai-case/v1/drafts' ) );
+			$this->t->same( 200, $r->get_status(), 'ログイン中' );
+			$this->t->true( in_array( $post, array_column( (array) ( $r->get_data()['drafts'] ?? array() ), 'post_id' ), true ), '一覧に含まれる' );
+			wp_set_current_user( 0 );
+			try {
+				$this->t->same( 401, rest_do_request( new \WP_REST_Request( 'GET', '/wp-ai-case/v1/drafts' ) )->get_status(), '未ログイン' );
+			} finally {
+				wp_set_current_user( $this->user );
+			}
+		} );
 	}
 
 	private function cleanup(): void {
