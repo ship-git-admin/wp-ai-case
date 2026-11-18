@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/wp-ai-case/v0.6/error_response.schema.json",
+  "title": "Safe client error envelope",
+  "type": "object",
+  "properties": {
+    "success": {
+      "const": false
+    },
+    "error_code": {
+      "type": "string",
+      "pattern": "^AI-0(0[1-9]|1[0-8])$"
+    },
+    "visibility": {
+      "enum": [
+        "customer",
+        "admin"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "support_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "recovery_action": {
+      "enum": [
+        "contact_admin",
+        "complete_input",
+        "retry_later",
+        "refresh_status",
+        "resume_job",
+        "review_draft",
+        "review_quota",
+        "open_admin_diagnostics",
+        "fix_config_and_retry",
+        "review_mapping",
+        "review_image"
+      ]
+    },
+    "provider_http_status_class": {
+      "enum": [
+        "none",
+        "4xx",
+        "5xx",
+        "network",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "success",
+    "error_code",
+    "visibility",
+    "message",
+    "retryable",
+    "support_id",
+    "recovery_action"
+  ],
+  "additionalProperties": false,
+  "description": "No raw API response/header/path/secret. PHP must select approved messages by code and visibility; a schema cannot enforce safe text or tenant scoping."
+}

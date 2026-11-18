@@ -1,0 +1,32 @@
+{
+  "image_analysis": [
+    {
+      "attachment_id": 11,
+      "phase": "before",
+      "description": "施工前",
+      "related_image_ids": [
+        12
+      ],
+      "evidence": "synthetic user hint",
+      "uncertain": false
+    },
+    {
+      "attachment_id": 12,
+      "phase": "after",
+      "description": "施工後",
+      "related_image_ids": [
+        11
+      ],
+      "evidence": "synthetic user hint",
+      "uncertain": false
+    }
+  ],
+  "article_facts": {
+    "title": "浴室改修",
+    "summary": "人工データ",
+    "body_outline": [
+      "施工前",
+      "施工後"
+    ]
+  }
+}

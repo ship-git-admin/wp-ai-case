@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACF mapping lifecycle transition event",
+  "$id": "https://example.invalid/wp-ai-case/v0.5/mapping_transition.schema.json",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "mapping_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "from_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "proposed",
+        "blocked_drift",
+        "proposed_rebuild",
+        "validated_local",
+        "pending_staging_validation",
+        "validated_staging",
+        "approved_active",
+        "blocked_unsupported",
+        "retired",
+        null
+      ]
+    },
+    "to_status": {
+      "enum": [
+        "proposed",
+        "blocked_drift",
+        "proposed_rebuild",
+        "validated_local",
+        "pending_staging_validation",
+        "validated_staging",
+        "approved_active",
+        "blocked_unsupported",
+        "retired"
+      ]
+    },
+    "event_type": {
+      "enum": [
+        "initial_proposal",
+        "schema_drift",
+        "compatible_update",
+        "rebuild_proposed",
+        "local_validation",
+        "staging_validation_requested",
+        "staging_validation_passed",
+        "approval",
+        "unsupported",
+        "retire"
+      ]
+    },
+    "schema_before": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schema_after": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "context_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "affected_post_ids": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor_user_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "event_id",
+    "mapping_id",
+    "from_status",
+    "to_status",
+    "event_type",
+    "schema_before",
+    "schema_after",
+    "context_hash",
+    "affected_post_ids",
+    "reason",
+    "actor_user_id",
+    "evidence_refs",
+    "occurred_at"
+  ],
+  "additionalProperties": false,
+  "description": "Allowed from->to combinations, monotonic version, admin approval, and required staging checks enforced by PHP state machine."
+}

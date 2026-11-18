@@ -1,0 +1,49 @@
+{
+  "document_id": "00000000-0000-4000-8000-000000000001",
+  "source_request_id": "00000000-0000-4000-8000-000000000002",
+  "post_type": "works",
+  "title": "【合成テスト】外壁・屋根塗装の施工事例（AIなし保存実証）",
+  "summary": "【合成テスト】この下書きはプラグインの保存試験用に作った架空のデータです。実在の施工・お客様とは関係ありません。",
+  "facts": {
+    "overview": { "value": "外壁塗装・屋根塗装（合成データ）", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "client_request": { "value": "【合成テスト】外壁の色あせと、屋根のコケが気になっている。\n長持ちする塗料で、明るい印象にしたい。", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "work_done": { "value": "【合成テスト】高圧洗浄のあと下地を補修し、外壁は下塗り・中塗り・上塗りの3回塗りで仕上げました。\n屋根は遮熱塗料を使用しました。", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "area": { "value": "〇〇市（合成データ）", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "building_type": { "value": "木造2階建て（合成データ）", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "duration": { "value": "約14日（合成データ）", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "cost": { "value": null, "status": "unknown", "source": "unknown", "evidence_image_ids": [] },
+    "materials": { "value": "シリコン系外壁塗料／遮熱屋根用塗料（合成データ）", "status": "provided", "source": "user_input", "evidence_image_ids": [] },
+    "floor_plan": { "value": "4LDK", "status": "inferred_from_image", "source": "photo", "evidence_image_ids": ["@img:after1"] }
+  },
+  "images": [
+    { "attachment_id": "@img:before1", "original_position": 0, "phase": "before", "description": "【合成】施工前の外壁全体", "caption": "施工前（外壁）", "related_image_ids": ["@img:after1"], "included": true, "uncertain": false },
+    { "attachment_id": "@img:before2", "original_position": 1, "phase": "before", "description": "【合成】施工前の屋根", "caption": "施工前（屋根）", "related_image_ids": ["@img:after2"], "included": true, "uncertain": false },
+    { "attachment_id": "@img:during1", "original_position": 2, "phase": "during", "description": "【合成】高圧洗浄の様子", "caption": "高圧洗浄", "related_image_ids": [], "included": true, "uncertain": false },
+    { "attachment_id": "@img:during2", "original_position": 3, "phase": "during", "description": "【合成】下塗りの様子", "caption": "下塗り", "related_image_ids": [], "included": true, "uncertain": false },
+    { "attachment_id": "@img:after1", "original_position": 4, "phase": "after", "description": "【合成】施工後の外壁全体", "caption": "施工後（外壁）", "related_image_ids": ["@img:before1"], "included": true, "uncertain": false },
+    { "attachment_id": "@img:after2", "original_position": 5, "phase": "after", "description": "【合成】施工後の屋根", "caption": "施工後（屋根）", "related_image_ids": ["@img:before2"], "included": true, "uncertain": false },
+    { "attachment_id": "@img:after3", "original_position": 6, "phase": "after", "description": "【合成】施工後の玄関まわり", "caption": "施工後（玄関まわり）", "related_image_ids": [], "included": true, "uncertain": false },
+    { "attachment_id": "@img:detail1", "original_position": 7, "phase": "unknown", "description": "【合成】使用した塗料の缶", "caption": "使用した塗料", "related_image_ids": [], "included": true, "uncertain": true }
+  ],
+  "sections": [
+    { "node_id": "intro", "kind": "introduction", "heading": "【合成テスト】色あせた外壁を、明るく長持ちする外観へ", "body": "【合成テスト】架空の施工事例です。保存と表示の確認だけに使います。", "image_ids": [], "evidence_image_ids": [] },
+    { "node_id": "before", "kind": "before", "heading": "施工前の状態（合成）", "body": "【合成】外壁の色あせと、屋根のコケが見られました。", "image_ids": ["@img:before1", "@img:before2"], "evidence_image_ids": ["@img:before1", "@img:before2"] },
+    { "node_id": "during", "kind": "during", "heading": "施工中の様子（合成）", "body": "【合成】洗浄と下地補修のあと、3回塗りで仕上げています。", "image_ids": ["@img:during1", "@img:during2"], "evidence_image_ids": ["@img:during1", "@img:during2"] },
+    { "node_id": "after", "kind": "after", "heading": "施工後（合成）", "body": "", "image_ids": ["@img:after1", "@img:after2", "@img:after3"], "evidence_image_ids": ["@img:after1"] },
+    { "node_id": "compare", "kind": "comparison", "heading": "外壁の比較（合成）", "body": "【合成】同じ位置から撮影した施工前と施工後です。", "image_ids": ["@img:before1", "@img:after1"], "evidence_image_ids": ["@img:before1", "@img:after1"] },
+    { "node_id": "feature", "kind": "feature", "heading": "こだわりポイント（合成）", "body": "【合成】遮熱塗料で、夏場の屋根の温度上昇を抑えます。", "image_ids": ["@img:detail1"], "evidence_image_ids": ["@img:detail1"] }
+  ],
+  "layout_intent": { "hero": "before_after", "notes": "合成データ" },
+  "seo": {
+    "title": "【合成テスト】外壁・屋根塗装の施工事例",
+    "description": "【合成テスト】保存試験用の架空データです。",
+    "h1": "【合成テスト】外壁・屋根塗装の施工事例",
+    "keywords": "合成テスト,外壁塗装,屋根塗装"
+  },
+  "status": "proposal",
+  "relations": {
+    "customer_voice_post_ids": ["@voice"],
+    "staff": [ { "post_id": "@staff", "comment": "【合成テスト】担当者コメントの表示確認用です。" } ],
+    "supervisor_post_ids": ["@supervisor"]
+  }
+}

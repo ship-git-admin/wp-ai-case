@@ -1,0 +1,376 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Typed, whitelisted revision operations",
+  "$id": "https://example.invalid/wp-ai-case/v0.5/revision_patch.schema.json",
+  "type": "object",
+  "properties": {
+    "post_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base_schema_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "base_context_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "base_mapping_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "base_mapping_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "idempotency_key": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "allowed_sections": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "title",
+          "body",
+          "concept",
+          "client_request",
+          "proposal",
+          "summary",
+          "facts",
+          "photos",
+          "before_after",
+          "layout",
+          "seo"
+        ]
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "text_set"
+              },
+              "section": {
+                "enum": [
+                  "title",
+                  "body",
+                  "concept",
+                  "client_request",
+                  "proposal",
+                  "summary"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "fact_set"
+              },
+              "section": {
+                "const": "facts"
+              },
+              "fact_key": {
+                "enum": [
+                  "overview",
+                  "client_request",
+                  "work_done",
+                  "area",
+                  "duration",
+                  "cost",
+                  "materials",
+                  "building_type",
+                  "notes",
+                  "floor_plan",
+                  "site_area"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "enum": [
+                  "user_input",
+                  "editor_review",
+                  "unknown"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "fact_key",
+              "value",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "image_order_set"
+              },
+              "section": {
+                "const": "photos"
+              },
+              "attachment_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "attachment_ids"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "image_visibility_set"
+              },
+              "section": {
+                "const": "photos"
+              },
+              "attachment_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "included": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "attachment_id",
+              "included"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "image_caption_set"
+              },
+              "section": {
+                "const": "photos"
+              },
+              "attachment_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "caption": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "attachment_id",
+              "caption"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "image_phase_set"
+              },
+              "section": {
+                "const": "before_after"
+              },
+              "attachment_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "phase": {
+                "enum": [
+                  "before",
+                  "during",
+                  "after",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "attachment_id",
+              "phase"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "image_relation_set"
+              },
+              "section": {
+                "const": "before_after"
+              },
+              "attachment_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "related_image_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "attachment_id",
+              "related_image_ids"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "layout_set"
+              },
+              "section": {
+                "const": "layout"
+              },
+              "hero": {
+                "enum": [
+                  "single",
+                  "gallery",
+                  "before_after",
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "hero"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "seo_set"
+              },
+              "section": {
+                "const": "seo"
+              },
+              "field": {
+                "enum": [
+                  "title",
+                  "description",
+                  "h1",
+                  "keywords"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "field",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "body_section_set"
+              },
+              "section": {
+                "const": "body"
+              },
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "heading": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "node_id",
+              "heading",
+              "body"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "post_id",
+    "base_version",
+    "base_schema_sha256",
+    "base_context_hash",
+    "base_mapping_id",
+    "base_mapping_version",
+    "idempotency_key",
+    "allowed_sections",
+    "operations"
+  ],
+  "additionalProperties": false,
+  "description": "UI all expands to named sections. PHP validates each operation.section in allowed_sections; attachment IDs are in original manifest; facts are grounded; base hashes, status and version match immediately before save."
+}

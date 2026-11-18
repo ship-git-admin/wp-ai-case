@@ -1,0 +1,17 @@
+{
+  "diagnosis_id": "c62f6960-61e6-4f88-9751-8896f73df9cd",
+  "checked_at": "2026-11-16T00:00:00Z",
+  "scope": "local_only",
+  "summary": "needs_configuration",
+  "external_api_called": true,
+  "checks": [
+    {
+      "check": "api_key_presence",
+      "status": "not_configured",
+      "error_code": "AI-001",
+      "action_code": "configure_wp_config"
+    }
+  ],
+  "safe_admin_message": "APIキーは設定されていません。",
+  "api_key": "SHOULD_NOT_BE_ALLOWED"
+}

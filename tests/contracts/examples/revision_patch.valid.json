@@ -1,0 +1,26 @@
+{
+  "post_id": 99,
+  "base_version": 3,
+  "base_schema_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_context_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "base_mapping_id": "44444444-4444-4444-8444-444444444444",
+  "base_mapping_version": 3,
+  "idempotency_key": "22222222-2222-4222-8222-222222222222",
+  "allowed_sections": [
+    "title",
+    "before_after"
+  ],
+  "operations": [
+    {
+      "op": "text_set",
+      "section": "title",
+      "value": "断熱改修を行った浴室"
+    },
+    {
+      "op": "image_phase_set",
+      "section": "before_after",
+      "attachment_id": 12,
+      "phase": "after"
+    }
+  ]
+}

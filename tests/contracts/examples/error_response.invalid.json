@@ -1,0 +1,10 @@
+{
+  "success": false,
+  "error_code": "AI-001",
+  "visibility": "customer",
+  "message": "エラー",
+  "retryable": false,
+  "support_id": "d02a0c7c-a639-4e52-8992-7ed09922a306",
+  "recovery_action": "contact_admin",
+  "server_php_version": "8.x"
+}

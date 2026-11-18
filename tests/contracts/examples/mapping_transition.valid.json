@@ -1,0 +1,19 @@
+{
+  "event_id": "55555555-5555-4555-8555-555555555555",
+  "mapping_id": "44444444-4444-4444-8444-444444444444",
+  "from_status": "blocked_drift",
+  "to_status": "proposed_rebuild",
+  "event_type": "rebuild_proposed",
+  "schema_before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "schema_after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "context_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "affected_post_ids": [
+    99
+  ],
+  "reason": "合成fixtureで階層変更を検出",
+  "actor_user_id": 1,
+  "evidence_refs": [
+    "synthetic-fixture-drift-v2"
+  ],
+  "occurred_at": "2026-11-13T00:00:00Z"
+}

@@ -1,0 +1,71 @@
+{
+  "mapping_id": "44444444-4444-4444-8444-444444444444",
+  "mapping_version": 3,
+  "site_scope_id": "synthetic-only-site",
+  "post_type": "works",
+  "context_selector": {
+    "post_type": "works",
+    "location_rule_fingerprint": "synthetic-rule-v2",
+    "taxonomy_terms": [
+      {
+        "taxonomy": "work_cat",
+        "term_id": 7
+      }
+    ]
+  },
+  "context_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schema_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "template_ref": {
+    "template_id": "generic-case",
+    "template_version": "1.0.0"
+  },
+  "mapping_status": "approved_active",
+  "bindings": [
+    {
+      "semantic_slot": "title",
+      "field_key": "field_demo_title",
+      "field_type": "text",
+      "path": [
+        "field_demo_title"
+      ],
+      "transform_id": "text.identity",
+      "editable": true,
+      "confidence": 0.97,
+      "verification": {
+        "field_exists": true,
+        "type_compatible": true,
+        "path_compatible": true,
+        "conditions_compatible": true,
+        "transform_registered": true
+      }
+    },
+    {
+      "semantic_slot": "photos.before",
+      "field_key": "field_demo_before",
+      "field_type": "image",
+      "path": [
+        "field_demo_before"
+      ],
+      "transform_id": "image.attachment_id",
+      "editable": true,
+      "confidence": 0.95,
+      "verification": {
+        "field_exists": true,
+        "type_compatible": true,
+        "path_compatible": true,
+        "conditions_compatible": true,
+        "transform_registered": true
+      }
+    }
+  ],
+  "validation": {
+    "fixture_passed": true,
+    "staging_write_read_passed": true,
+    "staging_display_passed": true,
+    "tested_schema_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tested_context_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "evidence_ref": "synthetic-test-only-not-real",
+    "verified_at": "2026-11-13T00:00:00Z"
+  },
+  "approval": null
+}

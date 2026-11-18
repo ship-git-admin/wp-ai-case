@@ -1,0 +1,14 @@
+{
+  "client_case_id": "synthetic-demo-001",
+  "idempotency_key": "11111111-1111-4111-8111-111111111111",
+  "mode": "create",
+  "post_type": "works",
+  "primary_facts": {
+    "overview": "合成データの浴室改修",
+    "client_request": "寒さを改善したい",
+    "work_done": "断熱材を追加して設備を交換"
+  },
+  "photo_set_description": "画像1は施工前、2は施工後の合成サンプル",
+  "images": [],
+  "consent_external_ai": true
+}

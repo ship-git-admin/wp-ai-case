@@ -1,0 +1,21 @@
+{
+  "diagnosis_id": "c62f6960-61e6-4f88-9751-8896f73df9cd",
+  "checked_at": "2026-11-16T00:00:00Z",
+  "scope": "local_only",
+  "summary": "needs_configuration",
+  "external_api_called": false,
+  "checks": [
+    {
+      "check": "api_key_presence",
+      "status": "not_configured",
+      "error_code": "AI-001",
+      "action_code": "configure_wp_config"
+    },
+    {
+      "check": "model_configuration",
+      "status": "ok",
+      "action_code": "none"
+    }
+  ],
+  "safe_admin_message": "Claude APIキーが未設定です。管理者はwp-config.phpの設定ガイドを確認してください。"
+}

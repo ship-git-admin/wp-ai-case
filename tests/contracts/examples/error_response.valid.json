@@ -1,0 +1,9 @@
+{
+  "success": false,
+  "error_code": "AI-001",
+  "visibility": "customer",
+  "message": "AI機能の準備が完了していません。サイト管理者にお問い合わせください。",
+  "retryable": false,
+  "support_id": "d02a0c7c-a639-4e52-8992-7ed09922a306",
+  "recovery_action": "contact_admin"
+}

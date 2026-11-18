@@ -1,0 +1,25 @@
+# OS / エディタ
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# 秘密・サイト固有情報（絶対にコミットしない）
+.env
+.env.*
+wp-config.php
+*.key
+*.pem
+.secret-scan-terms
+PRIVATE_REFERENCE_NOT_FOR_GIT/
+ORIGINAL_ATTACHMENTS/
+_private/
+_kit/
+_ref_theme/
+reports/
+
+# ビルド成果物
+/build/
+/dist/
+*.zip
+__pycache__/

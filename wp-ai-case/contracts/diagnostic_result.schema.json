@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/wp-ai-case/v0.6/diagnostic_result.schema.json",
+  "title": "Sanitized admin local diagnostics (never include secrets)",
+  "type": "object",
+  "properties": {
+    "diagnosis_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "const": "local_only"
+    },
+    "summary": {
+      "enum": [
+        "ready_unverified",
+        "needs_configuration",
+        "needs_attention",
+        "blocked_dependency",
+        "temporarily_unavailable"
+      ]
+    },
+    "external_api_called": {
+      "const": false
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {
+            "enum": [
+              "api_key_presence",
+              "model_configuration",
+              "monthly_quota",
+              "cost_guard",
+              "acf_mapping",
+              "background_jobs",
+              "rest_transport"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "not_configured",
+              "warning",
+              "blocked",
+              "unknown"
+            ]
+          },
+          "error_code": {
+            "type": "string",
+            "pattern": "^AI-0(0[1-9]|1[0-8])$"
+          },
+          "action_code": {
+            "enum": [
+              "none",
+              "configure_wp_config",
+              "verify_model",
+              "check_quota",
+              "check_budget",
+              "repair_acf_mapping",
+              "inspect_background_jobs",
+              "inspect_rest_basic_waf",
+              "review_provider_status"
+            ]
+          }
+        },
+        "required": [
+          "check",
+          "status",
+          "action_code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "safe_admin_message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 280
+    }
+  },
+  "required": [
+    "diagnosis_id",
+    "checked_at",
+    "scope",
+    "summary",
+    "external_api_called",
+    "checks",
+    "safe_admin_message"
+  ],
+  "additionalProperties": false,
+  "description": "Admin-only structured summary. Secret values, IPs, hosts, PHP versions, stack traces and raw upstream responses are disallowed by PHP contract and tests; schema cannot prove redaction."
+}
