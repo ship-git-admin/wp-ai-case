@@ -15,10 +15,13 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 * 「AI施工事例 > 接続・診断」（管理者）：APIキーの有無・ACFマッピング・新規作成枠・推定費用などのローカル診断と、明示操作の接続テスト。
 * 「AI施工事例 > マッピング」（管理者）：ACF の構造と保存先の対応の提案・検証・承認。
 * 公開・予約・非公開・削除はしません。ACF の定義やテーマは変更しません。
-* Advanced Custom Fields PRO が必要です。Claude API のキーは wp-config.php の WP_AI_ANTHROPIC_API_KEY に定義します（画面では入力しません）。
+* Advanced Custom Fields PRO が必要です。使う AI は wp-config.php の WP_AI_CASE_PROVIDER で選びます（anthropic＝Claude Haiku 5.5〔既定〕、openai＝GPT-6 Luna）。キーは WP_AI_ANTHROPIC_API_KEY／WP_AI_OPENAI_API_KEY に定義します（画面では入力しません）。
 * 更新は GitHub の公開リリースから、WordPress の更新画面で行います（同梱の Plugin Update Checker、MIT）。
 
 == Changelog ==
+
+= 0.1.1-dev =
+* 使う AI を Claude と OpenAI（Responses API、GPT-6 Luna）で切り替えられるようにした
 
 = 0.1.0 =
 * C0: 骨組み、契約 Schema、CaseDocument 検証

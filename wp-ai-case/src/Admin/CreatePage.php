@@ -43,6 +43,7 @@ final class CreatePage {
 					'isAdmin'        => current_user_can( 'manage_options' ),
 					'diagnosticsUrl' => current_user_can( 'manage_options' ) ? Menu::diagnostics_url() : '',
 					'insecure'       => ! is_ssl(),
+					'providerLabel'  => \WpAiCase\Diagnostics\Settings::info()['label'],
 				)
 			) . ';',
 			'before'

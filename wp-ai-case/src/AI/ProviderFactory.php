@@ -2,7 +2,7 @@
 /**
  * 使うプロバイダーを選ぶ。
  *
- * - 通常は Claude API（WordPress の HTTP API で直接呼ぶ。2026-11-18 依頼者の決定）
+ * - wp-config.php の WP_AI_CASE_PROVIDER で、Claude（既定）と OpenAI を切り替える（どちらも WordPress の HTTP API で直接呼ぶ）
  * - 開発用の Mock（dev/ がありオプションで有効なときだけ）
  *
  * @package WpAiCase
@@ -22,6 +22,10 @@ final class ProviderFactory {
 		if ( $provider instanceof ProviderInterface ) {
 			return $provider;
 		}
-		return new AnthropicProvider();
+		return self::for_provider( \WpAiCase\Diagnostics\Settings::provider() );
+	}
+
+	public static function for_provider( string $id ): ProviderInterface {
+		return 'openai' === $id ? new OpenAIProvider() : new AnthropicProvider();
 	}
 }

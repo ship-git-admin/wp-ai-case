@@ -1,6 +1,8 @@
 # 変更履歴
 
 ## 0.1.1（開発中）
+- 使う AI を `WP_AI_CASE_PROVIDER` で Claude（既定）と OpenAI に切り替えられるようにした（OpenAI は Responses API・構造化出力・`store=false`、GPT-6 Luna 固定）。依頼の内容・出力の形・検証・保存は共通
+- 管理者向けの案内・同意文・料金表を、選んだ AI に合わせて表示
 
 ## 0.1.0（2026-11-18）
 - C0：骨組み、契約 Schema、CaseDocument の検証

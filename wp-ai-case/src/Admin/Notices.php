@@ -29,7 +29,7 @@ final class Notices {
 		}
 		printf(
 			'<div class="notice notice-warning"><p>%s <a href="%s">%s</a></p></div>',
-			esc_html( 'WP AI Case（AI-001）：Claude APIキーが未設定のため、AIによる施工事例の作成は使えません。サイトの他の機能には影響しません。' ),
+			esc_html( 'WP AI Case（AI-001）：' . Settings::info()['api'] . ' のキーが未設定のため、AIによる施工事例の作成は使えません。サイトの他の機能には影響しません。' ),
 			esc_url( Menu::diagnostics_url() ),
 			esc_html( '接続・診断を開く' )
 		);

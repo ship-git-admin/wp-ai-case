@@ -150,3 +150,12 @@
 - 巻き戻しは前の版の ZIP で置き換える（データは残る）。テーブルの変更は列を足すだけにして、前の版でも動くようにする。
 - 同梱の readme パーサー（PUC に含まれる）の元のリポジトリにはライセンスの記載がない。公開前のライセンスの確認事項として残す。
 
+## D-029 使う AI の切り替え（Claude／OpenAI。2026-11-18 依頼者の決定）
+- Claude API が一時的に使えないため、`wp-config.php` の `WP_AI_CASE_PROVIDER` で Claude（既定）と OpenAI を切り替えられるようにした。モデルはそれぞれ固定（Claude Haiku 5.5／GPT-6 Luna。料金は同じ水準）。画面でモデルを選ぶ機能は作らない。
+- キーは選んだ AI の定数だけを読む（`WP_AI_ANTHROPIC_API_KEY`／`WP_AI_OPENAI_API_KEY`）。各プロバイダーは自分の定数しか読まない。値が正しくなければ Claude として扱い、診断で知らせる。
+- 依頼の本文・出力の形（JSON Schema）・PHP 側の検証・保存は共通。出力の形は両社の strict モードの共通部分（全項目 required・additionalProperties:false・最上位はオブジェクト）に収める（自己テスト J-29）。
+- OpenAI は Responses API（`POST /v1/responses`、`text.format=json_schema`・`strict:true`、`reasoning.effort=medium`、`max_output_tokens=16000`）。**`store=false`** で OpenAI 側に応答を保存させない（既定は保存）。写真は同じ縮小・メタデータ除去済みのコピーを data URL で送る（detail=high）。送信先は `https://api.openai.com` に固定、リダイレクトを追わない。
+- エラーは Claude と同じ種別にそろえて分類する。429 のうち残高・支出上限（insufficient_quota・credit_balance_exhausted・spend_limit 系）は請求の問題（AI-003）、それ以外はレート制限（AI-005）。
+- 接続テストの前回の結果は、モデルが変われば使わない（切り替え前の AI の結果で止めない）。作成画面の同意文・診断画面・管理者向けの案内は、選んだ AI の名前を表示する。
+- 料金表に GPT-6 Luna を追加（0.10/0.50、27.2万トークン超は入力2倍・出力1.5倍）。写真のトークンの係数は公開資料にないため、見積もりは多め（1枚5000）にした。
+

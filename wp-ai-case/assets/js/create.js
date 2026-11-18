@@ -14,6 +14,7 @@
 		return;
 	}
 	var FORM_KEY = 'wpaic_form_v1';
+	var PROVIDER = cfg.providerLabel || 'AI サービス';
 	var JOB_KEY = 'wpaic_job_v1';
 	var MODE_KEY = 'wpaic_mode_v1';
 	var PHASES = { unknown: '未指定', before: '施工前', during: '施工中', after: '施工後' };
@@ -205,7 +206,7 @@
 			return wrap;
 		}
 		wrap.appendChild( h( 'div', { class: 'wpaic-consent' },
-			h( 'p', { text: '修正の画面で「AIで修正」を押すと、選んだ部分の文章と写真の説明（写真そのものは送りません）を Anthropic 社の AI（Claude）へ送信します。画面での手直しだけなら外部へは送信しません。' } ),
+			h( 'p', { text: '修正の画面で「AIで修正」を押すと、選んだ部分の文章と写真の説明（写真そのものは送りません）を ' + PROVIDER + ' へ送信します。画面での手直しだけなら外部へは送信しません。' } ),
 			h( 'label', {}, h( 'input', { type: 'checkbox', checked: state.reviseConsent, on: { change: function ( e ) { state.reviseConsent = e.target.checked; render(); } } } ), ' 上記を確認し、外部AIへの送信に同意します' ) ) );
 		if ( ! state.draftList.length ) {
 			wrap.appendChild( h( 'p', { text: '修正できる下書きはありません（編集画面で作った下書きは、ここでは修正できません）。' } ) );
@@ -309,7 +310,7 @@
 
 		wrap.appendChild( h( 'h2', { text: '4. 外部AIへの送信' } ) );
 		wrap.appendChild( h( 'div', { class: 'wpaic-consent' },
-			h( 'p', { text: '「AIで下書きを作成」を押すと、次の内容を Anthropic 社の AI（Claude）へ送信します。' } ),
+			h( 'p', { text: '「AIで下書きを作成」を押すと、次の内容を ' + PROVIDER + ' へ送信します。' } ),
 			h( 'ul', {}, h( 'li', { text: '入力した一次情報と写真一式の説明' } ), h( 'li', { text: '選んだ写真のコピー（縮小し、撮影場所などの情報を取り除いたもの）' } ) ),
 			h( 'p', { text: '写真に人の顔・表札・住所・車のナンバーなどが写っていないか確認してください。元の写真は変更しません。' } ),
 			h( 'label', {}, h( 'input', { type: 'checkbox', checked: !! f.consent, on: { change: function ( e ) { f.consent = e.target.checked; saveForm(); render(); } } } ), ' 上記を確認し、外部AIへの送信に同意します' ) ) );

@@ -6,7 +6,7 @@
  *     今月の推定合計＋今回 ≤ 月の上限 / 今回 ≤ 1回の上限 / 今日のAI修正の回数 < 1日の上限
  * - 呼び出しの後に、応答の usage（トークン数）から推定費用を記録する（失敗・拒否の応答も記録する）。
  * - 料金表は版（確認日）付きで持つ。実額の請求はこの表と違いうるので「推定」と表示する。
- *   全体の実額の上限は Anthropic の Workspace／組織の上限で別に守る（このサイトの集計だけでは全サイトを止められない）。
+ *   全体の実額の上限は AI サービス側（Anthropic の Workspace／OpenAI のプロジェクト）の上限で別に守る（このサイトの集計だけでは全サイトを止められない）。
  * - 記録には元画像・施主名・ホスト・キー・通信ヘッダーを書かない（数値と種類だけ）。
  *
  * @package WpAiCase
@@ -24,17 +24,34 @@ final class CostGuard {
 
 	/**
 	 * USD / 100万トークン。tiers は「入力（プロンプト）のトークン数がこの値以下なら」の料金。
-	 * 出典：Anthropic のモデル・料金の資料（2026-11-18 確認）。料金が変わったらフィルター wp_ai_case_price_table で差し替える。
+	 * image_tokens は見積もり用の写真1枚あたりのトークン（長辺1568pxの写真の上限に近い値）、max_output は出力の上限。
+	 * 出典：各社のモデル・料金の資料（2026-11-18 確認）。料金が変わったらフィルター wp_ai_case_price_table で差し替える。
+	 *  - Claude Haiku 5.5：0.10/0.50（10万トークン以下）、0.50/2.50（超）、キャッシュ読み0.1倍・書き1.25倍
+	 *  - GPT-6 Luna：0.10/0.50（27.2万トークン以下）、超えると入力2倍・出力1.5倍、キャッシュ読み 0.01（0.1倍）・書き 0.125（1.25倍）
+	 *    写真のトークンは 32px 四方の区画の数×係数（係数は公開資料にないため、多めに見積もる）
 	 */
 	public const PRICES = array(
 		'claude-haiku-5-5' => array(
-			'version'     => 'anthropic-2026-11-18',
-			'tiers'       => array(
+			'version'      => 'anthropic-2026-11-18',
+			'tiers'        => array(
 				array( 100000, 0.10, 0.50 ),
 				array( PHP_INT_MAX, 0.50, 2.50 ),
 			),
-			'cache_read'  => 0.1,
-			'cache_write' => 1.25,
+			'cache_read'   => 0.1,
+			'cache_write'  => 1.25,
+			'image_tokens' => 2600,
+			'max_output'   => 8000,
+		),
+		'gpt-6-luna'       => array(
+			'version'      => 'openai-2026-11-18',
+			'tiers'        => array(
+				array( 272000, 0.10, 0.50 ),
+				array( PHP_INT_MAX, 0.20, 0.75 ),
+			),
+			'cache_read'   => 0.1,
+			'cache_write'  => 1.25,
+			'image_tokens' => 5000,
+			'max_output'   => 16000,
 		),
 	);
 
@@ -77,10 +94,11 @@ final class CostGuard {
 	 * @return array{input_tokens:int,usd:float}
 	 */
 	public static function estimate( string $model, int $images, int $text_bytes ): array {
-		$input = self::OVERHEAD_TOKENS + $images * self::IMAGE_TOKENS + (int) ceil( $text_bytes / 2 );
+		$p     = self::price( $model );
+		$input = self::OVERHEAD_TOKENS + $images * (int) ( $p['image_tokens'] ?? self::IMAGE_TOKENS ) + (int) ceil( $text_bytes / 2 );
 		return array(
 			'input_tokens' => $input,
-			'usd'          => self::usd( $model, $input, self::MAX_OUTPUT ),
+			'usd'          => self::usd( $model, $input, (int) ( $p['max_output'] ?? self::MAX_OUTPUT ) ),
 		);
 	}
 
@@ -172,7 +190,7 @@ final class CostGuard {
 				'count' => $this->today_count( 'revise' ),
 				'limit' => Settings::daily_revise_limit(),
 			),
-			'price_version' => (string) ( self::PRICES[ Settings::model() ]['version'] ?? '' ),
+			'price_version' => (string) ( self::price( Settings::model() )['version'] ?? '' ),
 		);
 	}
 

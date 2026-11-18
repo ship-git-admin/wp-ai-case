@@ -45,13 +45,13 @@ final class DiagnosticsPage {
 	private const ACTIONS = array(
 		'none'                    => '—',
 		'configure_wp_config'     => '下の「APIキーの設定方法」に従って wp-config.php に定義し、ローカル診断を再実行',
-		'verify_model'            => '接続テストで、モデル（Claude Haiku 5.5）を利用できるか確認',
+		'verify_model'            => '接続テストで、モデル（{model}）を利用できるか確認',
 		'check_quota'             => '今月の新規作成枠を使い切りました（下の「新規作成枠・使用量」を参照。翌月1日に戻ります）',
-		'check_budget'            => '推定費用が上限に近い／達しています（下の「新規作成枠・使用量」と Anthropic Console の使用量を確認）',
+		'check_budget'            => '推定費用が上限に近い／達しています（下の「新規作成枠・使用量」と {console} の使用量を確認）',
 		'repair_acf_mapping'      => '「AI施工事例 > マッピング」で状態を確認し、提案・検証・承認',
 		'inspect_background_jobs' => 'WP-Cron または後片付けが動いていません。Basic認証・WAF を確認し、サーバーの cron で wp ai-case maintenance を毎時実行',
 		'inspect_rest_basic_waf'  => 'REST の制限（Code Snippet の例外）・Basic認証・WAF・HTTPS の設定を確認',
-		'review_provider_status'  => 'Anthropic の稼働状況を確認',
+		'review_provider_status'  => '{company} の稼働状況を確認',
 	);
 
 	public static function register(): void {
@@ -106,7 +106,7 @@ final class DiagnosticsPage {
 		$last  = ProviderProbe::last();
 
 		echo '<div class="wrap"><h1>' . esc_html( 'AI施工事例：接続・診断' ) . '</h1>';
-		echo '<p>' . esc_html( 'この画面を開いただけでは外部（Claude API）へは通信しません。表示しているのはこのサーバー内の確認結果です。' ) . '</p>';
+		echo '<p>' . esc_html( 'この画面を開いただけでは外部（AI サービス）へは通信しません。表示しているのはこのサーバー内の確認結果です。' ) . '</p>';
 		if ( str_starts_with( \WpAiCase\AI\ProviderFactory::make()->id(), 'mock' ) ) {
 			echo '<div class="notice notice-warning inline"><p>' . esc_html( '開発用の模擬AI（Mock）が有効です。APIキーの状態は「設定済み」として扱われ、生成結果は【模擬】の固定文になります。外部へは通信しません。本番前に無効にしてください（wp ai-case poc mock-provider off）。' ) . '</p></div>';
 		}
@@ -131,23 +131,32 @@ final class DiagnosticsPage {
 				esc_html( self::CHECK_LABELS[ $c['check'] ] ?? $c['check'] ),
 				esc_html( self::STATUS_LABELS[ $c['status'] ] ?? $c['status'] ),
 				esc_html( (string) ( $c['error_code'] ?? '' ) ),
-				esc_html( self::ACTIONS[ $c['action_code'] ] ?? '' )
+				esc_html( ErrorCatalog::fill( self::ACTIONS[ $c['action_code'] ] ?? '' ) )
 			);
 		}
 		echo '</tbody></table>';
 		printf( '<p><a class="button" href="%s">%s</a></p>', esc_url( Menu::diagnostics_url() ), esc_html( 'ローカル診断を再実行' ) );
 
+		// 使う AI
+		$info = Settings::info();
+		echo '<h2>' . esc_html( '使う AI' ) . '</h2>';
+		printf( '<p>%s</p>', esc_html( $info['label'] . '。wp-config.php の定数 ' . Settings::PROVIDER_CONST . " で切り替えます（'anthropic' = Claude〔既定〕、'openai' = OpenAI）。切り替えたら、その AI の APIキーを設定し、接続テストを行ってください。" ) );
+		if ( Settings::provider_setting_invalid() ) {
+			echo '<div class="notice notice-error inline"><p>' . esc_html( Settings::PROVIDER_CONST . " の値が正しくありません（'anthropic' か 'openai'）。いまは Claude を使う設定として扱っています。" ) . '</p></div>';
+		}
+		echo '<pre style="background:#f6f7f7;padding:12px;max-width:900px;overflow:auto">' . esc_html( "// OpenAI に切り替える例（Claude に戻すときは 'anthropic' にするか、この行を消す）\ndefine( '" . Settings::PROVIDER_CONST . "', 'openai' );" ) . '</pre>';
+
 		// APIキー
 		$key = Settings::api_key_status();
-		echo '<h2>' . esc_html( 'APIキー' ) . '</h2>';
+		echo '<h2>' . esc_html( 'APIキー（' . $info['api'] . '）' ) . '</h2>';
 		printf( '<p>%s</p>', esc_html( 'configured' === $key ? '設定済み（値は表示しません。設定済みであることは、接続できることを意味しません）' : ( 'invalid_format' === $key ? '設定されていますが、形式が正しくありません（空白・改行などを含む）' : '未設定（AI-001）' ) ) );
 		echo '<details' . ( 'configured' === $key ? '' : ' open' ) . '><summary>' . esc_html( 'APIキーの設定方法（管理者向け）' ) . '</summary>';
 		echo '<p>' . esc_html( 'WordPress を設置したサーバーの wp-config.php に、次の定数を定義してください。位置は「/* That\'s all, stop editing! */」の近くなど、require_once ABSPATH . \'wp-settings.php\'; より前です。' ) . '</p>';
 		echo '<pre style="background:#f6f7f7;padding:12px;max-width:900px;overflow:auto">' . esc_html(
 			"// サーバーの環境変数から読む場合（推奨）\n" .
-			"define( 'WP_AI_ANTHROPIC_API_KEY', getenv( 'WP_AI_ANTHROPIC_API_KEY' ) ?: '' );\n\n" .
+			"define( '" . $info['key_const'] . "', getenv( '" . $info['key_const'] . "' ) ?: '' );\n\n" .
 			"// 環境変数を使えない場合は、サイト専用のキーを直接書く（下は例。REPLACE_… の部分を1Passwordの値に置き換える）\n" .
-			"// define( 'WP_AI_ANTHROPIC_API_KEY', 'REPLACE_WITH_SITE_SPECIFIC_KEY' );"
+			"// define( '" . $info['key_const'] . "', 'REPLACE_WITH_SITE_SPECIFIC_KEY' );"
 		) . '</pre>';
 		echo '<ul style="list-style:disc;margin-left:2em">';
 		foreach ( array(
@@ -162,12 +171,12 @@ final class DiagnosticsPage {
 
 		// モデル
 		echo '<h2>' . esc_html( '使用するモデル' ) . '</h2>';
-		echo '<p>' . esc_html( Settings::MODEL_LABEL . '（固定）。利用できるかは下の接続テストで確認します。' ) . '</p>';
+		echo '<p>' . esc_html( Settings::model_label() . '（' . Settings::info()['company'] . '、固定）。利用できるかは下の接続テストで確認します。' ) . '</p>';
 
 		// 接続テスト
 		echo '<h2>' . esc_html( '接続テスト（外部通信あり）' ) . '</h2>';
-		echo '<p>' . esc_html( '管理者がボタンを押したときだけ、Claude API に「認証とモデルの確認」だけを送ります。写真・文章・ACFの定義・サーバーの情報は送りません。' ) . '</p>';
-		echo '<p>' . esc_html( 'Anthropic の仕様により、費用やレート制限の消費が発生する可能性があります。間隔は' . ProviderProbe::COOLDOWN . '秒以上、1日' . ProviderProbe::DAILY_LIMIT . '回までです。' ) . '</p>';
+		echo '<p>' . esc_html( '管理者がボタンを押したときだけ、' . Settings::info()['api'] . ' に「認証とモデルの確認」だけを送ります。写真・文章・ACFの定義・サーバーの情報は送りません。' ) . '</p>';
+		echo '<p>' . esc_html( Settings::info()['company'] . ' の仕様により、費用やレート制限の消費が発生する可能性があります。間隔は' . ProviderProbe::COOLDOWN . '秒以上、1日' . ProviderProbe::DAILY_LIMIT . '回までです。' ) . '</p>';
 		if ( $last ) {
 			printf(
 				'<p>%s</p>',
@@ -213,9 +222,9 @@ final class DiagnosticsPage {
 		}
 		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '1回の依頼の上限（推定）' ), esc_html( $cost['request_limit'] > 0 ? $usd( (float) $cost['request_limit'] ) : '上限なし' ) );
 		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '今日のAIによる修正' ), esc_html( sprintf( '%d 回 ／ 上限 %s', $cost['daily_revise']['count'], $cost['daily_revise']['limit'] > 0 ? $cost['daily_revise']['limit'] . ' 回' : 'なし' ) ) );
-		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '料金表' ), esc_html( Settings::MODEL_LABEL . '（' . $cost['price_version'] . '）。推定費用は応答のトークン数から計算した目安で、請求額とは異なることがあります' ) );
+		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '料金表' ), esc_html( Settings::model_label() . '（' . $cost['price_version'] . '）。推定費用は応答のトークン数から計算した目安で、請求額とは異なることがあります' ) );
 		echo '</tbody></table>';
-		echo '<p class="description">' . esc_html( '上限は wp-config.php の WP_AI_CASE_MONTHLY_QUOTA（新規作成枠）、WP_AI_CASE_MONTHLY_USD_LIMIT（月の推定費用）、WP_AI_CASE_REQUEST_USD_LIMIT（1回）、WP_AI_CASE_DAILY_REVISE_LIMIT（1日のAI修正）で変えられます。全体の実額は Anthropic の Workspace／組織の上限でも守ってください。' ) . '</p>';
+		echo '<p class="description">' . esc_html( '上限は wp-config.php の WP_AI_CASE_MONTHLY_QUOTA（新規作成枠）、WP_AI_CASE_MONTHLY_USD_LIMIT（月の推定費用）、WP_AI_CASE_REQUEST_USD_LIMIT（1回）、WP_AI_CASE_DAILY_REVISE_LIMIT（1日のAI修正）で変えられます。全体の実額は AI サービス側（Anthropic の Workspace／OpenAI のプロジェクト）の上限でも守ってください。' ) . '</p>';
 
 		// バックグラウンド処理
 		echo '<h2>' . esc_html( 'バックグラウンド処理（WP-Cron・後片付け）' ) . '</h2>';

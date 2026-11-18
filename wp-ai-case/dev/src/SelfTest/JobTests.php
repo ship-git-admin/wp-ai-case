@@ -42,7 +42,7 @@ final class JobTests {
 		$saved_state = get_option( ProviderProbe::STATE_OPTION, null );
 		ProviderProbe::forget();
 		$guard = function ( $pre, $args, $url ) {
-			if ( false === $pre && str_contains( (string) $url, 'anthropic.com' ) ) {
+			if ( false === $pre && ( str_contains( (string) $url, 'anthropic.com' ) || str_contains( (string) $url, 'openai.com' ) ) ) {
 				++$this->external;
 				return new \WP_Error( 'wpaic_test_blocked', 'blocked' );
 			}
@@ -452,7 +452,126 @@ final class JobTests {
 			}
 		} );
 
-		$this->t->test( 'J-16', '試験中に Claude API への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
+		$t->test( 'J-19', 'OpenAI API への生成・修正リクエスト（模擬応答）：Responses API・構造化出力（strict）・応答を保存させない（store=false）・画像は位置情報なしの縮小コピー。拒否・途中終了は AI-009。キャッシュ分の使用量', function () use ( $images ) {
+			$sent = array();
+			$mode = 'ok';
+			$fake = static function ( $pre, $args, $url ) use ( &$sent, &$mode ) {
+				if ( ! str_contains( (string) $url, 'api.openai.com' ) ) {
+					return $pre;
+				}
+				$body   = json_decode( (string) $args['body'], true );
+				$sent[] = array( 'url' => $url, 'body' => $body, 'headers' => $args['headers'] );
+				$txt    = (string) $body['input'][0]['content'][0]['text'];
+				$first  = json_decode( substr( $txt, (int) strpos( $txt, '{' ) ), true );
+				if ( isset( $first['photos'] ) ) {
+					$ids = array_map( static fn( $p ) => (int) $p['attachment_id'], (array) $first['photos'] );
+					$out = array(
+						'images'    => array_map( static fn( $id ) => array( 'attachment_id' => $id, 'phase' => 'after', 'description' => '写真の説明', 'caption' => '', 'related_image_ids' => array(), 'uncertain' => false, 'uncertain_reason' => '' ), $ids ),
+						'article'   => array( 'title' => '試験タイトル', 'catch' => '試験', 'summary' => '試験', 'sections' => array( array( 'kind' => 'after', 'heading' => '施工後', 'body' => '本文', 'image_ids' => $ids ) ), 'seo' => array( 'title' => 't', 'description' => 'd', 'h1' => 'h', 'keywords' => 'k' ) ),
+						'questions' => array(),
+					);
+				} else {
+					$out = array( 'operations' => array( array( 'op' => 'text_set', 'section' => 'title', 'value' => '【修正】OpenAI の提案' ) ) );
+				}
+				$content = 'refusal' === $mode ? array( array( 'type' => 'refusal', 'refusal' => 'お手伝いできません' ) ) : array( array( 'type' => 'output_text', 'text' => wp_json_encode( $out ), 'annotations' => array() ) );
+				$resp    = array(
+					'id'                 => 'resp_test',
+					'object'             => 'response',
+					'status'             => 'incomplete' === $mode ? 'incomplete' : 'completed',
+					'incomplete_details' => 'incomplete' === $mode ? array( 'reason' => 'max_output_tokens' ) : null,
+					'output'             => array(
+						array( 'type' => 'reasoning', 'id' => 'rs_1', 'summary' => array() ),
+						array( 'type' => 'message', 'id' => 'msg_1', 'status' => 'completed', 'role' => 'assistant', 'content' => $content ),
+					),
+					'usage'              => array( 'input_tokens' => 3000, 'input_tokens_details' => array( 'cached_tokens' => 1000 ), 'output_tokens' => 500, 'output_tokens_details' => array( 'reasoning_tokens' => 200 ), 'total_tokens' => 3500 ),
+				);
+				return array( 'headers' => array( 'x-request-id' => 'req_oa' ), 'body' => wp_json_encode( $resp ), 'response' => array( 'code' => 200, 'message' => '' ), 'cookies' => array(), 'filename' => null );
+			};
+			$sw = static fn() => 'openai';
+			add_filter( 'pre_http_request', $fake, 0, 3 );
+			add_filter( 'wp_ai_case_provider_id', $sw );
+			try {
+				$provider = new \WpAiCase\AI\OpenAIProvider( new \WpAiCase\AI\OpenAIClient( 'test-key-not-real-3333' ) );
+				$s        = new JobService( null, $provider );
+				$in       = $this->input( $images );
+				$in['images'] = array_slice( $in['images'], 0, 2 );
+				$job      = $s->tick( $this->create( $s, $in )['job_id'], $this->user );
+				$this->t->same( 'proposal_ready', $job['status'], '状態' );
+				$this->t->same( array( 2000, 500 ), array( $job['data']['usage']['input_tokens'], $job['data']['usage']['output_tokens'] ), '使用量（キャッシュ分は別）' );
+				$b = $sent[0]['body'];
+				$this->t->same( 'https://api.openai.com/v1/responses', $sent[0]['url'], '送信先' );
+				$this->t->same( 'Bearer test-key-not-real-3333', $sent[0]['headers']['authorization'] ?? null, '認証' );
+				$this->t->same( array( 'gpt-6-luna', 'json_schema', true, 'case_draft', false, 'medium', 16000 ), array( $b['model'], $b['text']['format']['type'], $b['text']['format']['strict'], $b['text']['format']['name'], $b['store'], $b['reasoning']['effort'], $b['max_output_tokens'] ), 'モデル・構造化出力・保存させない' );
+				$this->t->true( '' !== (string) $b['instructions'] && ! isset( $b['temperature'] ) && ! isset( $b['top_p'] ), '指示文あり・送らない項目' );
+				$imgs = array_values( array_filter( $b['input'][0]['content'], static fn( $c ) => 'input_image' === $c['type'] ) );
+				$this->t->same( 2, count( $imgs ), '画像2枚' );
+				$this->t->true( str_starts_with( $imgs[0]['image_url'], 'data:image/jpeg;base64,' ) && 'high' === $imgs[0]['detail'], '画像の形' );
+				$tmp = wp_tempnam( 'wpaic-test' );
+				file_put_contents( $tmp, base64_decode( substr( $imgs[0]['image_url'], strlen( 'data:image/jpeg;base64,' ) ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				$this->t->same( false, ImagePreparer::has_metadata( $tmp ), '位置情報などのメタデータなし' );
+				wp_delete_file( $tmp );
+				$json = (string) wp_json_encode( $b );
+				foreach ( array( 'relations', 'customer_voice', 'post_id', 'wp-content', 'uploads', home_url() ) as $bad ) {
+					$this->t->true( ! str_contains( $json, $bad ), "送信内容に {$bad}" );
+				}
+				$job = $s->revise_ai( $job['job_id'], $this->user, 0, array( 'title' ), '短くして' );
+				$r   = end( $sent )['body'];
+				$this->t->same( array( '【修正】OpenAI の提案', 'case_revision' ), array( $job['data']['versions'][1]['title'], $r['text']['format']['name'] ), 'AIによる修正' );
+				$this->t->true( ! str_contains( (string) wp_json_encode( $r ), 'input_image' ), '修正では写真を送らない' );
+				foreach ( array( 'refusal' => 'AIが応答を断った', 'incomplete' => '出力が途中で終わった' ) as $m => $label ) {
+					$mode = $m;
+					$job2 = $s->tick( $this->create( $s, array_merge( $in, array( 'idempotency_key' => wp_generate_uuid4() ) ) )['job_id'], $this->user );
+					$this->t->same( array( 'failed', 'AI-009' ), array( $job2['status'], $job2['data']['error']['error_code'] ?? null ), $label );
+				}
+			} finally {
+				remove_filter( 'pre_http_request', $fake, 0 );
+				remove_filter( 'wp_ai_case_provider_id', $sw );
+			}
+		} );
+
+		$t->test( 'J-29', '出力の形（JSON Schema）が Claude・OpenAI の strict モードの条件を満たす（全項目 required・additionalProperties:false・最上位はオブジェクト・使えない書き方なし・10階層以内）', function () {
+			$errors = array();
+			$check  = function ( array $node, string $path, int $depth ) use ( &$check, &$errors ): void {
+				foreach ( array( 'allOf', 'oneOf', 'not', 'if', 'then', 'else', 'dependentRequired', 'dependentSchemas', 'minLength', 'maxLength', 'patternProperties', 'const' ) as $k ) {
+					if ( array_key_exists( $k, $node ) ) {
+						$errors[] = "{$path}: {$k}";
+					}
+				}
+				if ( $depth > 10 ) {
+					$errors[] = "{$path}: 階層が深すぎる";
+				}
+				if ( 'object' === ( $node['type'] ?? '' ) ) {
+					if ( false !== ( $node['additionalProperties'] ?? null ) ) {
+						$errors[] = "{$path}: additionalProperties";
+					}
+					$props = array_keys( (array) ( $node['properties'] ?? array() ) );
+					$req   = (array) ( $node['required'] ?? array() );
+					sort( $props );
+					sort( $req );
+					if ( $props !== $req ) {
+						$errors[] = "{$path}: required";
+					}
+					foreach ( (array) ( $node['properties'] ?? array() ) as $k => $v ) {
+						$check( $v, "{$path}.{$k}", $depth + 1 );
+					}
+				}
+				if ( isset( $node['items'] ) ) {
+					$check( $node['items'], "{$path}[]", $depth + 1 );
+				}
+				foreach ( (array) ( $node['anyOf'] ?? array() ) as $i => $v ) {
+					$check( $v, "{$path}|{$i}", $depth );
+				}
+			};
+			foreach ( array( 'compose' => \WpAiCase\AI\Prompts::compose_schema( true ), 'analyze' => \WpAiCase\AI\Prompts::compose_schema( false ), 'revise' => \WpAiCase\AI\Prompts::revise_schema() ) as $name => $schema ) {
+				if ( 'object' !== ( $schema['type'] ?? '' ) || isset( $schema['anyOf'] ) ) {
+					$errors[] = "{$name}: 最上位";
+				}
+				$check( $schema, $name, 1 );
+			}
+			$this->t->same( array(), $errors, '問題' );
+		} );
+
+		$this->t->test( 'J-16', '試験中に AI サービス（Claude・OpenAI）への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
 	}
 
 	/**

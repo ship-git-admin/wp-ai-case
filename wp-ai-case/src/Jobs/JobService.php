@@ -664,7 +664,7 @@ final class JobService {
 		} elseif ( 'compose' === $kind ) {
 			$mode = 'compose_text_only';
 		}
-		$with_data = 'compose_text_only' !== $mode && 'anthropic' === $this->provider()->id();
+		$with_data = 'compose_text_only' !== $mode && in_array( $this->provider()->id(), array( 'anthropic', 'openai' ), true ); // 模擬AIには画像を作らない
 		$list      = array();
 		foreach ( $images as $img ) {
 			$item = array(

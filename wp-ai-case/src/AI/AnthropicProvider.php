@@ -2,8 +2,7 @@
 /**
  * Claude API のプロバイダー。
  *
- * 現時点では接続テスト（モデルを1件取得：GET /v1/models/{id}）だけ。
- * 画像の解析・文章の生成は、顧客の入力フォームとジョブ処理と一緒に追加する。
+ * 接続テスト（GET /v1/models/{id}）、生成（写真の解析・下書き）・修正（POST /v1/messages、構造化出力）。
  *
  * @package WpAiCase
  */
@@ -23,7 +22,7 @@ final class AnthropicProvider implements ProviderInterface {
 	 */
 	public function __construct( ?AnthropicClient $client = null ) {
 		if ( null === $client ) {
-			$key    = Settings::api_key();
+			$key    = Settings::api_key_for( 'anthropic' );
 			$client = null !== $key ? new AnthropicClient( $key ) : null;
 		}
 		$this->client = $client;
@@ -72,24 +71,7 @@ final class AnthropicProvider implements ProviderInterface {
 		$content = array(
 			array(
 				'type' => 'text',
-				'text' => "施工事例の一次情報（利用者の入力）と写真です。\n" . (string) wp_json_encode(
-					array(
-						'facts'                 => $payload['facts'] ?? array(),
-						'photo_set_description' => (string) ( $payload['photo_set_description'] ?? '' ),
-						'photos'                => array_map(
-							static fn( $i ) => array(
-								'attachment_id' => (int) $i['attachment_id'],
-								'position'      => (int) $i['position'],
-								'caption'       => (string) ( $i['caption'] ?? '' ),
-								'phase_hint'    => (string) ( $i['phase_hint'] ?? 'unknown' ),
-							),
-							(array) ( $payload['images'] ?? array() )
-						),
-						'prior_analysis'        => $payload['prior_analysis'] ?? null,
-						'task'                  => 'analyze_only' === $mode ? 'images だけを出力（この写真のまとまりの解析）' : '全体の下書きを作成',
-					),
-					JSON_UNESCAPED_UNICODE
-				),
+				'text' => Prompts::compose_text( $payload ),
 			),
 		);
 		foreach ( (array) ( $payload['images'] ?? array() ) as $img ) {
@@ -116,14 +98,7 @@ final class AnthropicProvider implements ProviderInterface {
 		$content = array(
 			array(
 				'type' => 'text',
-				'text' => (string) wp_json_encode(
-					array(
-						'allowed_sections' => array_values( (array) ( $payload['allowed_sections'] ?? array() ) ),
-						'instruction'      => (string) ( $payload['instruction'] ?? '' ),
-						'draft'            => $payload['document'] ?? array(),
-					),
-					JSON_UNESCAPED_UNICODE
-				),
+				'text' => Prompts::revise_text( $payload ),
 			),
 		);
 		return $this->messages( Prompts::SYSTEM_REVISE, $content, Prompts::revise_schema(), (string) $payload['model'], 90 );

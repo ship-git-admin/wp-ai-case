@@ -2,7 +2,7 @@
 /**
  * C1-DIAG：設定不足・安全な診断・エラー分類・権限の試験。
  *
- * 外部（Claude API）への通信は pre_http_request で数え、試験中は遮断する。
+ * 外部（Claude API・OpenAI API）への通信は pre_http_request で数え、試験中は遮断する。
  * 設定（モデル・接続テストの状態・間隔制限）は試験の前に控え、最後に必ず戻す。
  *
  * @package WpAiCase
@@ -45,7 +45,7 @@ final class DiagnosticsTests {
 			'mock'     => get_option( MockProvider::OPTION, null ),
 		);
 		$guard = function ( $pre, $args, $url ) {
-			if ( false === $pre && is_string( $url ) && str_contains( $url, 'anthropic.com' ) ) {
+			if ( false === $pre && is_string( $url ) && ( str_contains( $url, 'anthropic.com' ) || str_contains( $url, 'openai.com' ) ) ) {
 				++$this->external_calls;
 				return new \WP_Error( 'wpaic_test_blocked', 'blocked in selftest' );
 			}
@@ -62,7 +62,7 @@ final class DiagnosticsTests {
 			}
 			delete_transient( 'wp_ai_case_probe_cooldown' );
 			wp_set_current_user( $this->admin );
-			$this->t->test( 'D-99', '試験中に Claude API への通信が 0 回（設定は元に戻した）', fn() => $this->t->same( 0, $this->external_calls, '外部通信の回数' ) );
+			$this->t->test( 'D-99', '試験中に AI サービス（Claude・OpenAI）への通信が 0 回（設定は元に戻した）', fn() => $this->t->same( 0, $this->external_calls, '外部通信の回数' ) );
 		}
 	}
 
@@ -310,6 +310,93 @@ final class DiagnosticsTests {
 				$this->t->same( 5, count( $sent ), 'キーなしでは通信しない' );
 			} finally {
 				remove_filter( 'pre_http_request', $fake, 0 );
+			}
+		} );
+
+		$t->test( 'D-14', 'OpenAI API 接続（WordPress の HTTP API）：送信先・Bearer 認証・リダイレクトなし・本文なし。エラーの分類（残高・支出上限は AI-003、レート制限は AI-005）', function () {
+			$sent  = array();
+			$queue = array();
+			$fake  = static function ( $pre, $args, $url ) use ( &$sent, &$queue ) {
+				if ( ! str_contains( (string) $url, 'api.openai.com' ) ) {
+					return $pre;
+				}
+				$sent[] = array( 'url' => $url, 'args' => $args );
+				return array_shift( $queue );
+			};
+			$resp  = static fn( int $code, array $body ) => array(
+				'headers'  => array( 'x-request-id' => 'req_oa123' ),
+				'body'     => (string) wp_json_encode( $body ),
+				'response' => array( 'code' => $code, 'message' => '' ),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+			$err   = static fn( string $type, string $code ) => array( 'error' => array( 'message' => 'raw upstream detail', 'type' => $type, 'param' => null, 'code' => $code ) );
+			$queue = array(
+				$resp( 200, array( 'id' => 'gpt-6-luna', 'object' => 'model', 'created' => 1, 'owned_by' => 'openai' ) ),
+				$resp( 401, $err( 'invalid_request_error', 'invalid_api_key' ) ),
+				$resp( 429, $err( 'insufficient_quota', 'insufficient_quota' ) ),
+				$resp( 429, $err( 'rate_limit_error', 'rate_limit_exceeded' ) ),
+				$resp( 429, $err( 'rate_limit_error', 'project_spend_limit_exceeded' ) ),
+				$resp( 404, $err( 'invalid_request_error', 'model_not_found' ) ),
+				$resp( 503, $err( 'service_unavailable_error', 'server_is_overloaded' ) ),
+				new \WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 15000 milliseconds' ),
+			);
+			add_filter( 'pre_http_request', $fake, 0, 3 );
+			try {
+				$key      = 'test-key-not-real-oa00';
+				$provider = new \WpAiCase\AI\OpenAIProvider( new \WpAiCase\AI\OpenAIClient( $key ) );
+				$ok       = $provider->probe( 'gpt-6-luna' );
+				$this->t->same( array( true, 'req_oa123', 'gpt-6-luna' ), array( $ok->ok, $ok->request_id, $ok->data['model_id'] ?? null ), '200' );
+				$codes = array();
+				for ( $i = 0; $i < 7; $i++ ) {
+					$codes[] = ErrorClassifier::from_provider( $provider->probe( 'gpt-6-luna' ) )['code'] ?? null;
+				}
+				$this->t->same( array( 'AI-002', 'AI-003', 'AI-005', 'AI-003', 'AI-004', 'AI-006', 'AI-007' ), $codes, '401/残高不足/レート制限/支出上限/モデルなし/過負荷/タイムアウト' );
+				$first = $sent[0];
+				$this->t->same( 'https://api.openai.com/v1/models/gpt-6-luna', $first['url'], '送信先' );
+				$this->t->same( array( 'GET', 'Bearer ' . $key, 0, true ), array( $first['args']['method'], $first['args']['headers']['authorization'] ?? null, $first['args']['redirection'], $first['args']['sslverify'] ), 'メソッド・認証・リダイレクト・証明書' );
+				$this->t->true( empty( $first['args']['body'] ), '本文を送らない（ユーザーのデータなし）' );
+				$this->t->same( 8, count( $sent ), '呼び出し回数' );
+				$this->t->same( 404, $provider->probe( '../v1/responses' )->http_status, '不正なモデル名' );
+				$this->t->same( true, ( new \WpAiCase\AI\OpenAIProvider() )->probe( 'gpt-6-luna' )->not_available, 'キーなし' );
+				$this->t->same( 8, count( $sent ), '不正なモデル名・キーなしでは通信しない' );
+			} finally {
+				remove_filter( 'pre_http_request', $fake, 0 );
+			}
+		} );
+
+		$t->test( 'D-15', '使う AI の切り替え（WP_AI_CASE_PROVIDER）：モデル・キーの定数・料金表・案内の文が切り替わり、前の AI の接続テストの結果は使わない。正しくない値は Claude', function () {
+			$this->t->same( array( 'anthropic', 'claude-haiku-5-5', 'WP_AI_ANTHROPIC_API_KEY' ), array( Settings::provider(), Settings::model(), Settings::key_const() ), '既定は Claude' );
+			$saved = get_option( ProviderProbe::STATE_OPTION, null );
+			update_option( ProviderProbe::STATE_OPTION, array( 'at' => time(), 'outcome' => 'failed', 'code' => 'AI-002', 'http_class' => '4xx', 'provider' => 'anthropic', 'model' => 'claude-haiku-5-5' ), false );
+			$this->t->true( null !== ProviderProbe::last(), 'Claude の接続テストの結果' );
+			$sw = static fn() => 'openai';
+			add_filter( 'wp_ai_case_provider_id', $sw );
+			try {
+				$this->t->same( array( 'openai', 'gpt-6-luna', 'WP_AI_OPENAI_API_KEY', 'GPT-6 Luna' ), array( Settings::provider(), Settings::model(), Settings::key_const(), Settings::model_label() ), 'OpenAI' );
+				$this->t->true( \WpAiCase\AI\ProviderFactory::for_provider( Settings::provider() ) instanceof \WpAiCase\AI\OpenAIProvider, 'プロバイダー' );
+				$this->t->same( null, ProviderProbe::last(), '前の AI の接続テストの結果は使わない' );
+				$msg = ErrorCatalog::message( 'AI-001', 'admin' );
+				$this->t->true( str_contains( $msg, 'WP_AI_OPENAI_API_KEY' ) && str_contains( $msg, 'OpenAI API' ) && ! str_contains( $msg, '{' ), '管理者向けの文：' . $msg );
+				$this->t->true( str_contains( ErrorCatalog::message( 'AI-003', 'admin' ), 'OpenAI Platform' ), '管理画面の名前' );
+				$this->t->true( \WpAiCase\Quota\CostGuard::estimate( 'gpt-6-luna', 20, 4000 )['usd'] < Settings::request_usd_limit(), '料金表（写真20枚の見積もりが1回の上限内）' );
+				Settings::$test_status = 'not_configured';
+				$html = $this->capture( array( DiagnosticsPage::class, 'render' ) );
+				Settings::$test_status = 'configured';
+				foreach ( array( 'OpenAI 社の AI（GPT）', 'WP_AI_OPENAI_API_KEY', 'GPT-6 Luna', 'WP_AI_CASE_PROVIDER' ) as $must ) {
+					$this->t->true( str_contains( $html, $must ), "診断画面に {$must}" );
+				}
+				$this->t->true( ! str_contains( $html, 'WP_AI_ANTHROPIC_API_KEY' ), '診断画面に Claude のキーの定数を出さない' );
+			} finally {
+				remove_filter( 'wp_ai_case_provider_id', $sw );
+				null === $saved ? delete_option( ProviderProbe::STATE_OPTION ) : update_option( ProviderProbe::STATE_OPTION, $saved, false );
+			}
+			$bad = static fn() => 'chatgpt';
+			add_filter( 'wp_ai_case_provider_id', $bad );
+			try {
+				$this->t->same( 'anthropic', Settings::provider(), '正しくない値' );
+			} finally {
+				remove_filter( 'wp_ai_case_provider_id', $bad );
 			}
 		} );
 

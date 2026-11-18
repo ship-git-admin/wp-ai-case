@@ -207,7 +207,7 @@ final class PocCommand {
 	 * ## OPTIONS
 	 *
 	 * <scenario>
-	 * : ok / 401 / 429 / 529 / timeout / bad_ids / evil など。off で無効（本物の Claude API を使う）
+	 * : ok / 401 / 429 / 529 / timeout / bad_ids / evil など。off で無効（WP_AI_CASE_PROVIDER で選んだ本物の AI を使う）
 	 *
 	 * @subcommand mock-provider
 	 * @param array<int,string>    $args
@@ -217,7 +217,7 @@ final class PocCommand {
 		$s = strtolower( (string) $args[0] );
 		if ( 'off' === $s ) {
 			delete_option( MockProvider::OPTION );
-			\WP_CLI::success( '模擬AIを無効にしました（本物の Claude API を使います。キーが未設定なら AI-001）' );
+			\WP_CLI::success( '模擬AIを無効にしました（' . \WpAiCase\Diagnostics\Settings::info()['api'] . ' を使います。キーが未設定なら AI-001）' );
 			return;
 		}
 		if ( ! in_array( $s, MockProvider::SCENARIOS, true ) ) {

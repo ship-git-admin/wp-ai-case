@@ -17,13 +17,13 @@ final class ErrorCatalog {
 	 * code => [顧客向け, 管理者向け, 再試行可, 復旧操作（顧客）, 復旧操作（管理者）, 自動リトライ方針]
 	 */
 	private const ENTRIES = array(
-		'AI-001' => array( 'AI機能の準備が完了していません。サイト管理者へお問い合わせください。', 'Claude APIキーが未設定です。wp-config.php に WP_AI_ANTHROPIC_API_KEY を定義し、「ローカル診断を再実行」してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
-		'AI-002' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', 'Claude API が認証を拒否しました（401）。キーの失効・Workspace・設定値を確認し、必要ならキーを再発行して wp-config.php を更新してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
-		'AI-003' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', 'Claude API がアクセスを拒否しました（403/402）。Workspace の権限・モデルの利用許可・請求状態を Anthropic Console で確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
-		'AI-004' => array( 'AI機能の設定確認待ちです。サイト管理者へお問い合わせください。', '使用するモデル（Claude Haiku 5.5、固定）を、このAPIキーの Workspace で利用できません。Anthropic Console でモデルの利用許可を確認し、「接続・診断」の接続テストで確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
-		'AI-005' => array( 'AI機能が一時的に使用できません。しばらくしてから再試行してください。', 'Claude API の利用制限（429）に達しました。レート制限か、Workspace／組織の上限かを Console の使用状況で確認してください。', true, 'retry_later', 'open_admin_diagnostics', '条件付・遅延' ),
-		'AI-006' => array( 'AI機能が一時的に混み合っています。時間をおいて再試行してください。', 'Claude API 側の一時的な障害・過負荷（5xx/529）です。時間をおいて再試行してください。', true, 'retry_later', 'retry_later', '冪等性確認後' ),
-		'AI-007' => array( 'AI機能との通信を確認中です。しばらくしてから再試行してください。', 'サーバーから Claude API への通信に失敗しました（DNS・TLS・タイムアウト等）。サーバーの外向きHTTPS通信を確認してください。', true, 'retry_later', 'open_admin_diagnostics', '安全性確認後' ),
+		'AI-001' => array( 'AI機能の準備が完了していません。サイト管理者へお問い合わせください。', '{api} のAPIキーが未設定です。wp-config.php に {key_const} を定義し、「ローカル診断を再実行」してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
+		'AI-002' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', '{api} が認証を拒否しました（401）。キーの失効・プロジェクト（Workspace）・設定値を確認し、必要ならキーを再発行して wp-config.php を更新してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
+		'AI-003' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', '{api} がアクセスを拒否しました（403/402、または残高・支出上限）。権限・モデルの利用許可・請求状態・支出上限を {console} で確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
+		'AI-004' => array( 'AI機能の設定確認待ちです。サイト管理者へお問い合わせください。', '使用するモデル（{model}、固定）を、このAPIキーで利用できません。{console} でモデルの利用許可を確認し、「接続・診断」の接続テストで確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
+		'AI-005' => array( 'AI機能が一時的に使用できません。しばらくしてから再試行してください。', '{api} の利用制限（429）に達しました。レート制限か、プロジェクト・組織の上限かを {console} の使用状況で確認してください。', true, 'retry_later', 'open_admin_diagnostics', '条件付・遅延' ),
+		'AI-006' => array( 'AI機能が一時的に混み合っています。時間をおいて再試行してください。', '{api} 側の一時的な障害・過負荷（5xx）です。時間をおいて再試行してください。', true, 'retry_later', 'retry_later', '冪等性確認後' ),
+		'AI-007' => array( 'AI機能との通信を確認中です。しばらくしてから再試行してください。', 'サーバーから {api} への通信に失敗しました（DNS・TLS・タイムアウト等）。サーバーの外向きHTTPS通信を確認してください。', true, 'retry_later', 'open_admin_diagnostics', '安全性確認後' ),
 		'AI-008' => array( '指定した画像を確認してください（形式・サイズ）。', '画像の形式・サイズ・入力容量の上限を超えました。対象の画像を確認してください（元画像は変更されません）。', false, 'review_image', 'review_image', '修正後のみ' ),
 		'AI-009' => array( '生成結果を確認中です。しばらくお待ちください。', 'AIの結果が期待した形式と一致しない、または写真の一部が欠けていたため、保存せずに止めました。', true, 'refresh_status', 'refresh_status', '条件付' ),
 		'AI-010' => array( 'サイト構成の再確認待ちです。サイト管理者へお問い合わせください。', 'ACFの構造とマッピングが一致しません。「AI施工事例 > マッピング」で、提案・検証用の下書きでの保存確認・表示確認・承認を行ってください（WP-CLI の wp ai-case mapping でも可）。', false, 'contact_admin', 'review_mapping', 'しない' ),
@@ -43,7 +43,24 @@ final class ErrorCatalog {
 
 	public static function message( string $code, string $visibility ): string {
 		$e = self::ENTRIES[ $code ] ?? self::ENTRIES['AI-018'];
-		return 'admin' === $visibility ? $e[1] : $e[0];
+		return 'admin' === $visibility ? self::fill( $e[1] ) : $e[0];
+	}
+
+	/**
+	 * 管理者向けの文の {api} などを、いま選んでいる AI の名前に置き換える。
+	 */
+	public static function fill( string $text ): string {
+		$i = Settings::info();
+		return strtr(
+			$text,
+			array(
+				'{api}'       => $i['api'],
+				'{company}'   => $i['company'],
+				'{console}'   => $i['console'],
+				'{model}'     => $i['model_label'],
+				'{key_const}' => $i['key_const'],
+			)
+		);
 	}
 
 	public static function retryable( string $code ): bool {
