@@ -46,6 +46,11 @@ final class AnthropicProvider implements ProviderInterface {
 		}
 		if ( $r['ok'] ) {
 			$id = is_array( $r['json'] ) ? (string) ( $r['json']['id'] ?? '' ) : '';
+			// 写真を扱うため、画像入力に対応しないモデルは使えないものとして扱う。
+			$image = is_array( $r['json'] ) ? ( $r['json']['capabilities']['image_input']['supported'] ?? null ) : null;
+			if ( false === $image ) {
+				return ProviderResult::http_error( (int) $r['status'], 'model_capability', $r['request_id'] );
+			}
 			return ProviderResult::success(
 				(int) $r['status'],
 				array(
@@ -57,5 +62,128 @@ final class AnthropicProvider implements ProviderInterface {
 		}
 		$type = is_array( $r['json'] ) ? (string) ( $r['json']['error']['type'] ?? '' ) : '';
 		return ProviderResult::http_error( (int) $r['status'], preg_match( '/^[a-z_]{1,40}$/', $type ) ? $type : null, $r['request_id'] );
+	}
+
+	public function compose( array $payload ): ProviderResult {
+		if ( null === $this->client ) {
+			return ProviderResult::unavailable();
+		}
+		$mode    = (string) ( $payload['mode'] ?? 'full' );
+		$content = array(
+			array(
+				'type' => 'text',
+				'text' => "施工事例の一次情報（利用者の入力）と写真です。\n" . (string) wp_json_encode(
+					array(
+						'facts'                 => $payload['facts'] ?? array(),
+						'photo_set_description' => (string) ( $payload['photo_set_description'] ?? '' ),
+						'photos'                => array_map(
+							static fn( $i ) => array(
+								'attachment_id' => (int) $i['attachment_id'],
+								'position'      => (int) $i['position'],
+								'caption'       => (string) ( $i['caption'] ?? '' ),
+								'phase_hint'    => (string) ( $i['phase_hint'] ?? 'unknown' ),
+							),
+							(array) ( $payload['images'] ?? array() )
+						),
+						'prior_analysis'        => $payload['prior_analysis'] ?? null,
+						'task'                  => 'analyze_only' === $mode ? 'images だけを出力（この写真のまとまりの解析）' : '全体の下書きを作成',
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			),
+		);
+		foreach ( (array) ( $payload['images'] ?? array() ) as $img ) {
+			if ( empty( $img['data'] ) ) {
+				continue;
+			}
+			$content[] = array( 'type' => 'text', 'text' => 'attachment_id: ' . (int) $img['attachment_id'] );
+			$content[] = array(
+				'type'   => 'image',
+				'source' => array(
+					'type'       => 'base64',
+					'media_type' => (string) $img['media_type'],
+					'data'       => (string) $img['data'],
+				),
+			);
+		}
+		return $this->messages( Prompts::SYSTEM_COMPOSE, $content, Prompts::compose_schema( 'analyze_only' !== $mode ), (string) $payload['model'], 150 );
+	}
+
+	public function revise( array $payload ): ProviderResult {
+		if ( null === $this->client ) {
+			return ProviderResult::unavailable();
+		}
+		$content = array(
+			array(
+				'type' => 'text',
+				'text' => (string) wp_json_encode(
+					array(
+						'allowed_sections' => array_values( (array) ( $payload['allowed_sections'] ?? array() ) ),
+						'instruction'      => (string) ( $payload['instruction'] ?? '' ),
+						'draft'            => $payload['document'] ?? array(),
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			),
+		);
+		return $this->messages( Prompts::SYSTEM_REVISE, $content, Prompts::revise_schema(), (string) $payload['model'], 90 );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $content
+	 * @param array<string,mixed>            $schema
+	 */
+	private function messages( string $system, array $content, array $schema, string $model, int $timeout ): ProviderResult {
+		$r = $this->client->request(
+			'POST',
+			'/v1/messages',
+			array(
+				'model'         => $model,
+				'max_tokens'    => 8000,
+				'system'        => $system,
+				'messages'      => array(
+					array(
+						'role'    => 'user',
+						'content' => $content,
+					),
+				),
+				'output_config' => array(
+					'effort' => 'medium',
+					'format' => array(
+						'type'   => 'json_schema',
+						'schema' => $schema,
+					),
+				),
+			),
+			$timeout
+		);
+		if ( $r['network_error'] ) {
+			return ProviderResult::network( $r['timed_out'] );
+		}
+		if ( ! $r['ok'] ) {
+			$type = is_array( $r['json'] ) ? (string) ( $r['json']['error']['type'] ?? '' ) : '';
+			return ProviderResult::http_error( (int) $r['status'], preg_match( '/^[a-z_]{1,40}$/', $type ) ? $type : null, $r['request_id'] );
+		}
+		$json  = $r['json'] ?? array();
+		$stop  = (string) ( $json['stop_reason'] ?? '' );
+		$usage = array(
+			'input_tokens'  => (int) ( $json['usage']['input_tokens'] ?? 0 ),
+			'output_tokens' => (int) ( $json['usage']['output_tokens'] ?? 0 ),
+		);
+		if ( 'refusal' === $stop || 'max_tokens' === $stop ) {
+			return new ProviderResult( false, (int) $r['status'], 'refusal' === $stop ? 'refusal' : 'incomplete_output', false, false, false, $r['request_id'], array( 'usage' => $usage ) );
+		}
+		$text = '';
+		foreach ( (array) ( $json['content'] ?? array() ) as $block ) {
+			if ( is_array( $block ) && 'text' === ( $block['type'] ?? '' ) ) {
+				$text = (string) ( $block['text'] ?? '' );
+				break;
+			}
+		}
+		$data = json_decode( $text, true );
+		if ( ! is_array( $data ) ) {
+			return new ProviderResult( false, (int) $r['status'], 'invalid_output', false, false, false, $r['request_id'], array( 'usage' => $usage ) );
+		}
+		return ProviderResult::success( (int) $r['status'], array( 'content' => $data, 'usage' => $usage ), $r['request_id'] );
 	}
 }

@@ -202,6 +202,32 @@ final class PocCommand {
 	}
 
 	/**
+	 * 開発用の模擬AI（Mock）を切り替える。有効な間は外部へ通信せず、生成結果は【模擬】と表示される。
+	 *
+	 * ## OPTIONS
+	 *
+	 * <scenario>
+	 * : ok / 401 / 429 / 529 / timeout / bad_ids / evil など。off で無効（本物の Claude API を使う）
+	 *
+	 * @subcommand mock-provider
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function mock_provider( array $args, array $assoc ): void {
+		$s = strtolower( (string) $args[0] );
+		if ( 'off' === $s ) {
+			delete_option( MockProvider::OPTION );
+			\WP_CLI::success( '模擬AIを無効にしました（本物の Claude API を使います。キーが未設定なら AI-001）' );
+			return;
+		}
+		if ( ! in_array( $s, MockProvider::SCENARIOS, true ) ) {
+			\WP_CLI::error( implode( ' / ', MockProvider::SCENARIOS ) . ' / off のいずれか' );
+		}
+		update_option( MockProvider::OPTION, $s, false );
+		\WP_CLI::success( "模擬AIを有効にしました（{$s}）。外部へは通信しません" );
+	}
+
+	/**
 	 * 保存済みの合成下書きを、DBから読み直して期待値と比べる（保存時のマッピングの版で）。
 	 *
 	 * ## OPTIONS

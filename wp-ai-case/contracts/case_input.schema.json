@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AI create or revise request (wire contract)",
-  "$id": "https://example.invalid/wp-ai-case/v0.5/case_input.schema.json",
+  "$id": "https://example.invalid/wp-ai-case/v0.6.2/case_input.schema.json",
   "type": "object",
   "properties": {
     "client_case_id": {
@@ -110,6 +110,55 @@
     },
     "consent_external_ai": {
       "const": true
+    },
+    "relations": {
+      "description": "任意。お客様の声・担当スタッフ（最大3）・監修者の投稿ID。空なら紐付けなし。PHPが投稿タイプ・公開状態を確認する。",
+      "type": "object",
+      "properties": {
+        "customer_voice_post_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "staff": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "post_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "comment": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "post_id",
+              "comment"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "supervisor_post_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "customer_voice_post_ids",
+        "staff",
+        "supervisor_post_ids"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -159,5 +208,5 @@
       }
     }
   ],
-  "description": "Only requests to an AI-assisted endpoint; local GUI-only edits use TypedPatch and do not require external consent. Duplicate attachment IDs and active-user permission are checked in PHP."
+  "description": "Only requests to an AI-assisted endpoint; local GUI-only edits use TypedPatch and do not require external consent. Duplicate attachment IDs and active-user permission are checked in PHP. v0.6.2: optional relations."
 }

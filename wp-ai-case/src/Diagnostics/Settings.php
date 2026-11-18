@@ -14,16 +14,12 @@ defined( 'ABSPATH' ) || exit;
 
 final class Settings {
 
-	public const OPTION     = 'wp_ai_case_settings';
-	public const KEY_CONST  = 'WP_AI_ANTHROPIC_API_KEY';
-	public const MODEL_CONST = 'WP_AI_CASE_MODEL';
+	public const OPTION    = 'wp_ai_case_settings';
+	public const KEY_CONST = 'WP_AI_ANTHROPIC_API_KEY';
 
-	/** 選べるモデル（画像入力に対応するもの）。実際の利用可否は管理者の接続テストで確かめる。 */
-	public const MODELS = array(
-		'claude-opus-5-5'   => 'Claude Opus 5.5（推奨）',
-		'claude-sonnet-5-5' => 'Claude Sonnet 5.5',
-		'claude-haiku-5-5'  => 'Claude Haiku 5.5',
-	);
+	/** 使うモデルは固定（2026-11-18 依頼者の決定）。利用できるかは管理者の接続テストで確かめる。 */
+	public const MODEL       = 'claude-haiku-5-5';
+	public const MODEL_LABEL = 'Claude Haiku 5.5';
 
 	/**
 	 * 試験用：キーの「状態」だけを差し替える（null なら無効）。差し替え中は api_key() が常に null を返すので、
@@ -67,29 +63,6 @@ final class Settings {
 	}
 
 	public static function model(): string {
-		if ( defined( self::MODEL_CONST ) && is_string( constant( self::MODEL_CONST ) ) ) {
-			$model = (string) constant( self::MODEL_CONST );
-			return isset( self::MODELS[ $model ] ) ? $model : '';
-		}
-		$opt   = get_option( self::OPTION, array() );
-		$model = is_array( $opt ) ? (string) ( $opt['model'] ?? '' ) : '';
-		return isset( self::MODELS[ $model ] ) ? $model : '';
-	}
-
-	public static function model_locked_by_constant(): bool {
-		return defined( self::MODEL_CONST );
-	}
-
-	public static function set_model( string $model ): bool {
-		if ( ! isset( self::MODELS[ $model ] ) || self::model_locked_by_constant() ) {
-			return false;
-		}
-		$opt          = get_option( self::OPTION, array() );
-		$opt          = is_array( $opt ) ? $opt : array();
-		$opt['model'] = $model;
-		update_option( self::OPTION, $opt, false );
-		// モデルを変えたら、前の接続テストの結果は使わない。
-		ProviderProbe::forget();
-		return true;
+		return self::MODEL;
 	}
 }

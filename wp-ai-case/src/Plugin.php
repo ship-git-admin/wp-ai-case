@@ -24,6 +24,7 @@ final class Plugin {
 
 		Support\Installer::maybe_install();
 		Rest\RestController::register();
+		Rest\JobController::register();
 		if ( is_admin() ) {
 			Admin\Menu::register();
 		}

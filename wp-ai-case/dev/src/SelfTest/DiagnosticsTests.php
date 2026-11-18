@@ -144,7 +144,6 @@ final class DiagnosticsTests {
 
 		$t->test( 'D-05', 'C1-DIAG05 ローカル診断・画面表示では外部通信0。「設定済み」を「接続成功」と表示しない', function () {
 			Settings::$test_status = 'configured';
-			Settings::set_model( 'claude-opus-5-5' );
 			$before = $this->external_calls;
 			$d      = DiagnosticsService::run();
 			$this->capture( array( DiagnosticsPage::class, 'render' ) );
@@ -158,7 +157,6 @@ final class DiagnosticsTests {
 
 		$t->test( 'D-06', 'C1-DIAG06 接続テストは管理者の明示操作だけ：同意なし・非管理者・未設定・間隔制限では通信しない', function () {
 			Settings::$test_status = 'configured';
-			Settings::set_model( 'claude-opus-5-5' );
 			delete_transient( 'wp_ai_case_probe_cooldown' );
 			$mock         = new MockProvider( 'ok' );
 			MockProvider::$calls = 0;
@@ -189,7 +187,7 @@ final class DiagnosticsTests {
 				'timeout' => 'AI-007',
 			);
 			foreach ( $expect as $scenario => $code ) {
-				$c = ErrorClassifier::from_provider( ( new MockProvider( $scenario ) )->probe( 'claude-opus-5-5' ) );
+				$c = ErrorClassifier::from_provider( ( new MockProvider( $scenario ) )->probe( 'claude-haiku-5-5' ) );
 				$this->t->same( $code, $c['code'] ?? null, $scenario );
 			}
 			$this->t->same( null, ErrorClassifier::from_provider( ProviderResult::success( 200 ) ), '成功' );
@@ -198,14 +196,14 @@ final class DiagnosticsTests {
 
 		$t->test( 'D-08', '接続テストで認証拒否（AI-002）が分かったら、直すまで生成を始めない。診断は「要対応」', function () {
 			Settings::$test_status = 'configured';
-			Settings::set_model( 'claude-opus-5-5' );
 			delete_transient( 'wp_ai_case_probe_cooldown' );
 			$r = ProviderProbe::run( $this->admin, true, new MockProvider( '401' ) );
 			$this->t->same( 'AI-002', $r['code'], '分類' );
 			$this->t->same( 'AI-002', PreflightService::check( $this->admin )['code'], 'プリフライト' );
 			$this->t->same( 'needs_attention', DiagnosticsService::run()['summary'], '診断' );
-			Settings::set_model( 'claude-sonnet-5-5' );
-			$this->t->same( null, ProviderProbe::last(), 'モデルを変えたら前の結果は使わない' );
+			ProviderProbe::forget();
+			$this->t->same( null, ProviderProbe::last(), '結果を消したら未確認に戻る' );
+			$this->t->same( 'claude-haiku-5-5', Settings::model(), 'モデルは Claude Haiku 5.5 に固定' );
 		} );
 
 		$t->test( 'D-09', 'C1-DIAG11/16 サポート記録：秘密・URL・パス・IP・PHP版を消し、許可した項目だけを残す', function () {
@@ -253,7 +251,6 @@ final class DiagnosticsTests {
 			Settings::$test_status = 'not_configured';
 			$this->t->same( 'AI-001', PreflightService::check( $this->admin )['code'], '直す前' );
 			Settings::$test_status = 'configured';
-			Settings::set_model( 'claude-opus-5-5' );
 			ProviderProbe::forget();
 			$this->t->same( true, PreflightService::check( $this->admin )['ok'], '直した後' );
 		} );
@@ -277,7 +274,7 @@ final class DiagnosticsTests {
 			);
 			$err  = static fn( string $type ) => array( 'type' => 'error', 'error' => array( 'type' => $type, 'message' => 'raw upstream detail' ) );
 			$queue = array(
-				$resp( 200, array( 'id' => 'claude-opus-5-5', 'display_name' => 'Claude Opus 5.5', 'type' => 'model' ) ),
+				$resp( 200, array( 'id' => 'claude-haiku-5-5', 'display_name' => 'Claude Haiku 5.5', 'type' => 'model' ) ),
 				$resp( 401, $err( 'authentication_error' ) ),
 				$resp( 429, $err( 'rate_limit_error' ) ),
 				$resp( 529, $err( 'overloaded_error' ) ),
@@ -287,17 +284,17 @@ final class DiagnosticsTests {
 			try {
 				$key      = 'test-key-not-real-0000';
 				$provider = new \WpAiCase\AI\AnthropicProvider( new \WpAiCase\AI\AnthropicClient( $key ) );
-				$ok       = $provider->probe( 'claude-opus-5-5' );
+				$ok       = $provider->probe( 'claude-haiku-5-5' );
 				$this->t->same( true, $ok->ok, '200' );
-				$this->t->same( 'Claude Opus 5.5', $ok->data['display_name'] ?? null, '表示名' );
+				$this->t->same( 'Claude Haiku 5.5', $ok->data['display_name'] ?? null, '表示名' );
 				$this->t->same( 'req_test123', $ok->request_id, 'request-id' );
 				$codes = array();
 				foreach ( array( 1, 2, 3, 4 ) as $i ) {
-					$codes[] = ErrorClassifier::from_provider( $provider->probe( 'claude-opus-5-5' ) )['code'] ?? null;
+					$codes[] = ErrorClassifier::from_provider( $provider->probe( 'claude-haiku-5-5' ) )['code'] ?? null;
 				}
 				$this->t->same( array( 'AI-002', 'AI-005', 'AI-006', 'AI-007' ), $codes, '401/429/529/タイムアウト' );
 				$first = $sent[0];
-				$this->t->same( 'https://api.anthropic.com/v1/models/claude-opus-5-5', $first['url'], '送信先' );
+				$this->t->same( 'https://api.anthropic.com/v1/models/claude-haiku-5-5', $first['url'], '送信先' );
 				$this->t->same( 'GET', $first['args']['method'], 'メソッド' );
 				$this->t->same( $key, $first['args']['headers']['x-api-key'] ?? null, 'x-api-key' );
 				$this->t->same( '2026-10-21', $first['args']['headers']['anthropic-version'] ?? null, 'anthropic-version' );
@@ -309,7 +306,7 @@ final class DiagnosticsTests {
 				$this->t->same( 404, $provider->probe( '../v1/messages' )->http_status, '不正なモデル名' );
 				$this->t->same( 5, count( $sent ), '不正なモデル名では通信しない' );
 				// キーがなければ通信しない。
-				$this->t->same( true, ( new \WpAiCase\AI\AnthropicProvider() )->probe( 'claude-opus-5-5' )->not_available, 'キーなし' );
+				$this->t->same( true, ( new \WpAiCase\AI\AnthropicProvider() )->probe( 'claude-haiku-5-5' )->not_available, 'キーなし' );
 				$this->t->same( 5, count( $sent ), 'キーなしでは通信しない' );
 			} finally {
 				remove_filter( 'pre_http_request', $fake, 0 );
@@ -318,7 +315,6 @@ final class DiagnosticsTests {
 
 		$t->test( 'D-13', '接続テストの記録・状態にキーや外部APIの生の文面を残さない', function () {
 			Settings::$test_status = 'configured';
-			Settings::set_model( 'claude-opus-5-5' );
 			delete_transient( 'wp_ai_case_probe_cooldown' );
 			$fake = static function ( $pre, $args, $url ) {
 				return str_contains( (string) $url, 'anthropic.com' ) ? array(

@@ -23,5 +23,17 @@
       "user_phase_hint": "after"
     }
   ],
-  "consent_external_ai": true
+  "consent_external_ai": true,
+  "relations": {
+    "customer_voice_post_ids": [
+      501
+    ],
+    "staff": [
+      {
+        "post_id": 601,
+        "comment": "合成"
+      }
+    ],
+    "supervisor_post_ids": []
+  }
 }

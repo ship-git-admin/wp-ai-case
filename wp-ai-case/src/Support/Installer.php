@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class Installer {
 
-	public const DB_VERSION        = '2';
+	public const DB_VERSION        = '3';
 	private const DB_VERSION_OPTION = 'wp_ai_case_db_version';
 	private const SITE_SCOPE_OPTION = 'wp_ai_case_site_scope_id';
 
@@ -23,6 +23,11 @@ final class Installer {
 	public static function events_table(): string {
 		global $wpdb;
 		return $wpdb->prefix . 'wpaic_mapping_events';
+	}
+
+	public static function jobs_table(): string {
+		global $wpdb;
+		return $wpdb->prefix . 'wpaic_jobs';
 	}
 
 	public static function support_log_table(): string {
@@ -96,6 +101,29 @@ final class Installer {
   PRIMARY KEY  (id),
   UNIQUE KEY support_id (support_id),
   KEY created_at (created_at)
+) {$charset};"
+		);
+		$jobs = self::jobs_table();
+		dbDelta(
+			"CREATE TABLE {$jobs} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  job_id char(36) NOT NULL,
+  idempotency_key char(36) NOT NULL,
+  user_id bigint(20) unsigned NOT NULL,
+  mode varchar(16) NOT NULL,
+  status varchar(24) NOT NULL,
+  job_generation int(10) unsigned NOT NULL DEFAULT 1,
+  post_id bigint(20) unsigned DEFAULT NULL,
+  lease_until datetime DEFAULT NULL,
+  lease_owner char(36) DEFAULT NULL,
+  data longtext NOT NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  expires_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY job_id (job_id),
+  UNIQUE KEY idempotency_key (idempotency_key),
+  KEY user_status (user_id,status)
 ) {$charset};"
 		);
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, false );

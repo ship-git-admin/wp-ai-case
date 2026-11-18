@@ -31,6 +31,8 @@ final class ErrorClassifier {
 		$class  = $status >= 500 ? '5xx' : ( $status >= 400 ? '4xx' : 'unknown' );
 
 		$code = match ( true ) {
+			'model_capability' === $type => 'AI-004',
+			in_array( $type, array( 'refusal', 'incomplete_output', 'invalid_output' ), true ) => 'AI-009',
 			401 === $status || 'authentication_error' === $type => 'AI-002',
 			402 === $status || 'billing_error' === $type, 403 === $status || 'permission_error' === $type => 'AI-003',
 			404 === $status || 'not_found_error' === $type => 'AI-004',

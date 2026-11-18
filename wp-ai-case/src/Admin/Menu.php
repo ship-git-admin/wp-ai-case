@@ -20,6 +20,7 @@ final class Menu {
 	public static function register(): void {
 		add_action( 'admin_menu', array( self::class, 'menus' ) );
 		DiagnosticsPage::register();
+		CreatePage::register();
 		Notices::register();
 	}
 

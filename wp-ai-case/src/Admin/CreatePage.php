@@ -1,8 +1,9 @@
 <?php
 /**
- * 「施工事例をAIで作成」画面（C1-C 前半：利用可否の表示のみ。入力フォームは次の段階）。
+ * 「施工事例をAIで作成」画面（顧客向け）。
  *
- * 一般顧客には、エラーコードと「管理者へ問い合わせ」だけを表示する。設定方法・キー・サーバー情報は表示しない。
+ * 画面は assets/js/create.js が組み立てる。通信は REST（wp-ai-case/v1、ログインCookie＋nonce）。
+ * 一般顧客には、エラーコードと安全な文面だけを表示する（設定方法・キー・サーバー情報は出さない）。
  *
  * @package WpAiCase
  */
@@ -15,15 +16,46 @@ defined( 'ABSPATH' ) || exit;
 
 final class CreatePage {
 
+	public const HOOK = 'toplevel_page_wp-ai-case';
+
+	public static function register(): void {
+		add_action( 'admin_enqueue_scripts', array( self::class, 'enqueue' ) );
+	}
+
+	public static function enqueue( string $hook ): void {
+		if ( self::HOOK !== $hook ) {
+			return;
+		}
+		wp_enqueue_media();
+		$ver = defined( 'WP_AI_CASE_VERSION' ) ? WP_AI_CASE_VERSION : '0';
+		wp_enqueue_style( 'wp-ai-case-create', plugins_url( 'assets/css/create.css', WP_AI_CASE_FILE ), array(), $ver );
+		wp_enqueue_script( 'wp-ai-case-create', plugins_url( 'assets/js/create.js', WP_AI_CASE_FILE ), array(), $ver, true );
+		wp_add_inline_script(
+			'wp-ai-case-create',
+			'window.WPAIC = ' . wp_json_encode(
+				array(
+					'root'           => esc_url_raw( rest_url( 'wp-ai-case/v1/' ) ),
+					'nonce'          => wp_create_nonce( 'wp_rest' ),
+					'isAdmin'        => current_user_can( 'manage_options' ),
+					'diagnosticsUrl' => current_user_can( 'manage_options' ) ? Menu::diagnostics_url() : '',
+					'insecure'       => ! is_ssl(),
+				)
+			) . ';',
+			'before'
+		);
+	}
+
 	public static function render(): void {
 		$type = get_post_type_object( 'works' );
 		if ( ! $type || ! current_user_can( $type->cap->edit_posts ) ) {
 			wp_die( esc_html__( 'この画面を表示する権限がありません。', 'wp-ai-case' ), 403 );
 		}
 		$pre = PreflightService::check( get_current_user_id() );
-
-		echo '<div class="wrap">';
+		echo '<div class="wrap wpaic">';
 		echo '<h1>' . esc_html( '施工事例をAIで作成' ) . '</h1>';
+		if ( str_starts_with( \WpAiCase\AI\ProviderFactory::make()->id(), 'mock' ) ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html( '開発用の模擬AIで動作しています。作られる文章は【模擬】の固定文で、写真や文章は外部へ送信されません。' ) . '</p></div>';
+		}
 		if ( ! $pre['ok'] ) {
 			printf(
 				'<div class="notice notice-error inline"><p><strong>%s</strong>（%s）</p></div>',
@@ -33,11 +65,9 @@ final class CreatePage {
 			if ( current_user_can( 'manage_options' ) ) {
 				printf( '<p><a class="button" href="%s">%s</a></p>', esc_url( Menu::diagnostics_url() ), esc_html( '接続・診断を開く（管理者）' ) );
 			}
-		} else {
-			echo '<div class="notice notice-success inline"><p>' . esc_html( 'AI機能を利用できる状態です。' ) . '</p></div>';
 		}
-		echo '<p>' . esc_html( '入力フォーム（施工概要・ご要望・施工内容・写真・外部送信への同意）は準備中です。' ) . '</p>';
-		printf( '<p><button type="button" class="button button-primary" disabled>%s</button></p>', esc_html( 'AIで下書きを作成' ) );
+		echo '<div id="wpaic-app" data-available="' . ( $pre['ok'] ? '1' : '0' ) . '"><p>' . esc_html( '読み込み中…' ) . '</p></div>';
+		echo '<noscript><p>' . esc_html( 'この画面を使うには JavaScript を有効にしてください。' ) . '</p></noscript>';
 		echo '</div>';
 	}
 }

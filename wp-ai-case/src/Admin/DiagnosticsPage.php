@@ -45,7 +45,7 @@ final class DiagnosticsPage {
 	private const ACTIONS = array(
 		'none'                    => '—',
 		'configure_wp_config'     => '下の「APIキーの設定方法」に従って wp-config.php に定義し、ローカル診断を再実行',
-		'verify_model'            => '下の「使用するモデル」で選び、接続テストで確認',
+		'verify_model'            => '接続テストで、モデル（Claude Haiku 5.5）を利用できるか確認',
 		'check_quota'             => '新規作成枠の管理は次の段階（C1-D）で実装予定',
 		'check_budget'            => '費用上限の管理は次の段階（C1-D）で実装予定',
 		'repair_acf_mapping'      => 'wp ai-case mapping status / propose で確認・再設定し、検証・承認',
@@ -55,16 +55,8 @@ final class DiagnosticsPage {
 	);
 
 	public static function register(): void {
-		add_action( 'admin_post_wp_ai_case_set_model', array( self::class, 'handle_set_model' ) );
 		add_action( 'admin_post_wp_ai_case_probe', array( self::class, 'handle_probe' ) );
 		add_action( 'admin_post_wp_ai_case_support_lookup', array( self::class, 'handle_support_lookup' ) );
-	}
-
-	public static function handle_set_model(): void {
-		self::guard( 'wp_ai_case_set_model' );
-		$model = isset( $_POST['model'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['model'] ) ) : '';
-		$ok    = Settings::set_model( $model );
-		self::flash( $ok ? array( 'type' => 'success', 'text' => 'モデルを保存しました。接続テストで利用できるか確認してください。' ) : array( 'type' => 'error', 'text' => 'モデルを保存できませんでした。' ) );
 	}
 
 	public static function handle_probe(): void {
@@ -115,6 +107,9 @@ final class DiagnosticsPage {
 
 		echo '<div class="wrap"><h1>' . esc_html( 'AI施工事例：接続・診断' ) . '</h1>';
 		echo '<p>' . esc_html( 'この画面を開いただけでは外部（Claude API）へは通信しません。表示しているのはこのサーバー内の確認結果です。' ) . '</p>';
+		if ( str_starts_with( \WpAiCase\AI\ProviderFactory::make()->id(), 'mock' ) ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html( '開発用の模擬AI（Mock）が有効です。APIキーの状態は「設定済み」として扱われ、生成結果は【模擬】の固定文になります。外部へは通信しません。本番前に無効にしてください（wp ai-case poc mock-provider off）。' ) . '</p></div>';
+		}
 
 		if ( is_array( $flash ) ) {
 			printf( '<div class="notice notice-%s"><p>%s</p></div>', esc_attr( (string) $flash['type'] ), esc_html( (string) $flash['text'] ) );
@@ -167,20 +162,7 @@ final class DiagnosticsPage {
 
 		// モデル
 		echo '<h2>' . esc_html( '使用するモデル' ) . '</h2>';
-		if ( Settings::model_locked_by_constant() ) {
-			echo '<p>' . esc_html( 'wp-config.php の WP_AI_CASE_MODEL で指定されています：' . ( '' !== Settings::model() ? Settings::MODELS[ Settings::model() ] : '（無効な値）' ) ) . '</p>';
-		} else {
-			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
-			wp_nonce_field( 'wp_ai_case_set_model' );
-			echo '<input type="hidden" name="action" value="wp_ai_case_set_model">';
-			echo '<select name="model"><option value="">' . esc_html( '（選択してください）' ) . '</option>';
-			foreach ( Settings::MODELS as $id => $label ) {
-				printf( '<option value="%s"%s>%s</option>', esc_attr( $id ), selected( Settings::model(), $id, false ), esc_html( $label ) );
-			}
-			echo '</select> ';
-			submit_button( '保存', 'secondary', 'submit', false );
-			echo '</form>';
-		}
+		echo '<p>' . esc_html( Settings::MODEL_LABEL . '（固定）。利用できるかは下の接続テストで確認します。' ) . '</p>';
 
 		// 接続テスト
 		echo '<h2>' . esc_html( '接続テスト（外部通信あり）' ) . '</h2>';
@@ -194,14 +176,14 @@ final class DiagnosticsPage {
 		} else {
 			echo '<p>' . esc_html( '前回の結果：未確認' ) . '</p>';
 		}
-		$disabled = 'configured' !== $key || '' === Settings::model() || ProviderProbe::cooldown_remaining() > 0;
+		$disabled = 'configured' !== $key || ProviderProbe::cooldown_remaining() > 0;
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( 'wp_ai_case_probe' );
 		echo '<input type="hidden" name="action" value="wp_ai_case_probe">';
 		echo '<label><input type="checkbox" name="ack_cost" value="1"> ' . esc_html( '費用・レート消費が発生する可能性があることを理解しました' ) . '</label><br><br>';
 		submit_button( '接続テストを実行', 'primary', 'submit', false, $disabled ? array( 'disabled' => 'disabled' ) : array() );
 		if ( $disabled ) {
-			echo ' <span class="description">' . esc_html( 'APIキーとモデルを設定すると実行できます（実行直後は間隔制限があります）。' ) . '</span>';
+			echo ' <span class="description">' . esc_html( 'APIキーを設定すると実行できます（実行直後は間隔制限があります）。' ) . '</span>';
 		}
 		echo '</form>';
 
