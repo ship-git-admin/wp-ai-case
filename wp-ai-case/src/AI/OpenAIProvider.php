@@ -103,7 +103,7 @@ final class OpenAIProvider implements ProviderInterface {
 				'text' => Prompts::revise_text( $payload ),
 			),
 		);
-		return $this->respond( Prompts::SYSTEM_REVISE, $content, 'case_revision', Prompts::revise_schema(), (string) $payload['model'], 90 );
+		return $this->respond( Prompts::SYSTEM_REVISE, $content, 'case_revision', Prompts::revise_schema( (array) ( $payload['document'] ?? array() ), array_values( (array) ( $payload['allowed_sections'] ?? array() ) ) ) ?? Prompts::revise_schema(), (string) $payload['model'], 90 );
 	}
 
 	/**

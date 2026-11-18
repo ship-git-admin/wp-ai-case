@@ -101,7 +101,7 @@ final class AnthropicProvider implements ProviderInterface {
 				'text' => Prompts::revise_text( $payload ),
 			),
 		);
-		return $this->messages( Prompts::SYSTEM_REVISE, $content, Prompts::revise_schema(), (string) $payload['model'], 90 );
+		return $this->messages( Prompts::SYSTEM_REVISE, $content, Prompts::revise_schema( (array) ( $payload['document'] ?? array() ), array_values( (array) ( $payload['allowed_sections'] ?? array() ) ) ) ?? Prompts::revise_schema(), (string) $payload['model'], 90 );
 	}
 
 	/**

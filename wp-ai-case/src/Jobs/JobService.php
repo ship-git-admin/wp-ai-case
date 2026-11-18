@@ -472,6 +472,10 @@ final class JobService {
 			throw new JobError( $pre['error'], 503 );
 		}
 		$doc     = $job['data']['versions'][ $base_index ];
+		if ( null === \WpAiCase\AI\Prompts::revise_schema( $doc, $allowed ) ) {
+			// 選んだ部分に、AI に任せられる修正が1つもない（送信しない）。
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'revise_nothing_for_ai', array( 'job_id' => $job_id ) ), 400, array( 'fields' => array( '選んだ部分は AI では修正できません（画面で直接直してください）' ) ) );
+		}
 		$payload = array(
 			'model'            => Settings::model(),
 			'document'         => $doc,

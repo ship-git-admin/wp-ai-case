@@ -19,6 +19,7 @@ use WpAiCase\Diagnostics\Settings;
 use WpAiCase\Jobs\ImagePreparer;
 use WpAiCase\Jobs\JobError;
 use WpAiCase\Jobs\JobService;
+use WpAiCase\Jobs\PatchApplier;
 use WpAiCase\Plugin;
 use WpAiCase\Support\Installer;
 
@@ -568,7 +569,20 @@ final class JobTests {
 				}
 				$check( $schema, $name, 1 );
 			}
+			$doc = \WpAiCase\Mapping\SampleDocument::get();
+			foreach ( array( array( 'title', 'body' ), PatchApplier::SECTIONS ) as $allowed ) {
+				$check( (array) \WpAiCase\AI\Prompts::revise_schema( $doc, $allowed ), 'revise(' . implode( ',', $allowed ) . ')', 1 );
+			}
 			$this->t->same( array(), $errors, '問題' );
+			// 選んだ部分・下書きの番号に絞った形
+			$narrow = \WpAiCase\AI\Prompts::revise_schema( $doc, array( 'title', 'body' ) );
+			$items  = $narrow['properties']['operations']['items']['anyOf'];
+			$this->t->same( array( array( 'text_set' ), array( 'body_section_set' ) ), array_map( static fn( $o ) => $o['properties']['op']['enum'], $items ), '選んだ部分の操作だけ' );
+			$this->t->same( array( 'title' ), $items[0]['properties']['section']['enum'], 'text_set はタイトルだけ' );
+			$this->t->true( ! in_array( 'intro', $items[1]['properties']['node_id']['enum'], true ) && in_array( 'before', $items[1]['properties']['node_id']['enum'], true ), '本文の番号に導入文（intro）を含めない' );
+			$photo = \WpAiCase\AI\Prompts::revise_schema( $doc, array( 'photos' ) )['properties']['operations']['items'];
+			$this->t->same( array_column( $doc['images'], 'attachment_id' ), $photo['properties']['attachment_id']['enum'], '写真の番号は下書きにあるものだけ' );
+			$this->t->same( null, \WpAiCase\AI\Prompts::revise_schema( $doc, array( 'facts' ) ), 'AI の操作がない部分だけを選んだら送らない' );
 		} );
 
 		$this->t->test( 'J-16', '試験中に AI サービス（Claude・OpenAI）への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
