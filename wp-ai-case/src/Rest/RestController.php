@@ -2,10 +2,13 @@
 /**
  * REST（wp-ai-case/v1）。WordPress のログインCookie＋nonce と権限で守る。
  *
- * - /ping           … 疎通確認（内容なし）
+ * - /ping           … 疎通確認（ログインユーザー、内容なし）
  * - /preflight      … ログインユーザー：利用できるか（顧客向けの安全な文面だけ）
  * - /diagnostics    … 管理者：ローカル診断（diagnostic_result）
  * - /support/{id}   … 管理者：サポートIDの記録
+ *
+ * 共通テンプレートのサイトでは、Code Snippet「RESTAPIセキュリティ設定」が管理者以外の REST を止めている。
+ * そこへ `wp-ai-case/` の例外を追加して使う（ログイン・nonce・権限の確認はこのクラスの permission_callback で行う）。
  *
  * @package WpAiCase
  */
@@ -33,7 +36,7 @@ final class RestController {
 			array(
 				'methods'             => 'GET',
 				'callback'            => static fn() => array( 'ok' => true ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => static fn() => is_user_logged_in(),
 			)
 		);
 		register_rest_route(

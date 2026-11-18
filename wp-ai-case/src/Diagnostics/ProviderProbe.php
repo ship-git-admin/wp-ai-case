@@ -122,7 +122,7 @@ final class ProviderProbe {
 	public static function message( array $state ): string {
 		return match ( $state['outcome'] ) {
 			'passed'        => '接続テストに成功しました（認証とモデルの到達を確認）。以後の生成が必ず成功することを保証するものではありません。',
-			'not_available' => '接続テストはまだ利用できません（Claude API 接続の実装方式の確定待ち）。外部への通信は行っていません。',
+			'not_available' => 'APIキーを読み取れなかったため、接続テストを実行していません（外部への通信は行っていません）。',
 			default         => ErrorCatalog::message( (string) $state['code'], 'admin' ),
 		};
 	}

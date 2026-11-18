@@ -2,9 +2,8 @@
 /**
  * 使うプロバイダーを選ぶ。
  *
+ * - 通常は Claude API（WordPress の HTTP API で直接呼ぶ。2026-11-18 依頼者の決定）
  * - 開発用の Mock（dev/ がありオプションで有効なときだけ）
- * - Claude API との接続は、実装方式（公式SDKの同梱か WordPress の HTTP API か）の確定後に追加する。
- *   それまでは「未実装」を返し、外部へは一切通信しない。
  *
  * @package WpAiCase
  */
@@ -23,6 +22,6 @@ final class ProviderFactory {
 		if ( $provider instanceof ProviderInterface ) {
 			return $provider;
 		}
-		return new PendingProvider();
+		return new AnthropicProvider();
 	}
 }

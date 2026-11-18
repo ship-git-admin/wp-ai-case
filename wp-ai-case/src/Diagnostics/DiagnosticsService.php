@@ -129,7 +129,7 @@ final class DiagnosticsService {
 
 	/**
 	 * REST の内部経路（このプラグインの ping）が使えるか。HTTP 経路（Basic認証・WAF）は確認できない。
-	 * あわせて、管理者以外の REST がサイトの設定で止められていないかも見る（顧客画面は admin-ajax なので影響しない）。
+	 * あわせて、管理者以外の REST がサイトの設定で止められていないかも見る（顧客画面が使えなくなるので「異常」）。
 	 *
 	 * @return array<string,string>
 	 */
@@ -138,7 +138,10 @@ final class DiagnosticsService {
 		if ( $response->is_error() || 200 !== $response->get_status() ) {
 			return array( 'check' => 'rest_transport', 'status' => 'blocked', 'error_code' => 'AI-015', 'action_code' => 'inspect_rest_basic_waf' );
 		}
-		if ( self::rest_restricted_for_non_admins() || ! is_ssl() ) {
+		if ( self::rest_restricted_for_non_admins() ) {
+			return array( 'check' => 'rest_transport', 'status' => 'blocked', 'error_code' => 'AI-015', 'action_code' => 'inspect_rest_basic_waf' );
+		}
+		if ( ! is_ssl() ) {
 			return array( 'check' => 'rest_transport', 'status' => 'warning', 'action_code' => 'inspect_rest_basic_waf' );
 		}
 		return array( 'check' => 'rest_transport', 'status' => 'ok', 'action_code' => 'none' );

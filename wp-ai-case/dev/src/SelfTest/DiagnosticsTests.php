@@ -45,7 +45,7 @@ final class DiagnosticsTests {
 			'mock'     => get_option( MockProvider::OPTION, null ),
 		);
 		$guard = function ( $pre, $args, $url ) {
-			if ( is_string( $url ) && str_contains( $url, 'anthropic.com' ) ) {
+			if ( false === $pre && is_string( $url ) && str_contains( $url, 'anthropic.com' ) ) {
 				++$this->external_calls;
 				return new \WP_Error( 'wpaic_test_blocked', 'blocked in selftest' );
 			}
@@ -104,8 +104,7 @@ final class DiagnosticsTests {
 			wp_set_current_user( 0 );
 			$this->t->same( 401, rest_do_request( new \WP_REST_Request( 'GET', $diag ) )->get_status(), '匿名：診断' );
 			$this->t->same( 401, rest_do_request( new \WP_REST_Request( 'GET', '/wp-ai-case/v1/preflight' ) )->get_status(), '匿名：プリフライト' );
-			$this->t->same( false, \WpAiCase\Rest\AjaxController::can_use( 0 ), '匿名：admin-ajax' );
-			$this->t->same( false, has_action( 'wp_ajax_nopriv_wp_ai_case_preflight' ), '未ログイン用の admin-ajax を登録しない' );
+			$this->t->same( 401, rest_do_request( new \WP_REST_Request( 'GET', '/wp-ai-case/v1/ping' ) )->get_status(), '匿名：ping' );
 			wp_set_current_user( $this->admin );
 			$deny = static function ( $allcaps ) {
 				$allcaps['manage_options'] = false;
@@ -115,11 +114,13 @@ final class DiagnosticsTests {
 			try {
 				$this->t->same( 403, rest_do_request( new \WP_REST_Request( 'GET', $diag ) )->get_status(), '非管理者：診断' );
 				$this->t->same( 403, rest_do_request( new \WP_REST_Request( 'GET', "/wp-ai-case/v1/support/{$sid}" ) )->get_status(), '非管理者：サポート記録' );
-				// 顧客向けは admin-ajax（サイトの設定で非管理者の REST が止められていても使える）。
-				$this->t->true( \WpAiCase\Rest\AjaxController::can_use( $this->admin ), '編集権限のある非管理者は利用可' );
-				$pre = \WpAiCase\Rest\AjaxController::preflight( $this->admin );
-				$this->t->true( ! str_contains( (string) wp_json_encode( $pre ), 'checks' ), 'プリフライトに診断の中身を含めない' );
-				$this->t->true( null === $pre['error'] || 'customer' === $pre['error']['visibility'], '顧客向けの文面' );
+				// 顧客向けは REST（Code Snippet に wp-ai-case/ の例外を追加済み）。
+				$pre = rest_do_request( new \WP_REST_Request( 'GET', '/wp-ai-case/v1/preflight' ) );
+				$this->t->same( 200, $pre->get_status(), '非管理者：プリフライトは可（Snippet の例外が必要）' );
+				$data = $pre->get_data();
+				$this->t->true( ! str_contains( (string) wp_json_encode( $data ), 'checks' ), 'プリフライトに診断の中身を含めない' );
+				$this->t->true( null === $data['error'] || 'customer' === $data['error']['visibility'], '顧客向けの文面' );
+				$this->t->same( false, \WpAiCase\Diagnostics\DiagnosticsService::rest_restricted_for_non_admins(), 'REST 制限の検出（例外あり）' );
 			} finally {
 				remove_filter( 'user_has_cap', $deny );
 			}
@@ -255,6 +256,91 @@ final class DiagnosticsTests {
 			Settings::set_model( 'claude-opus-5-5' );
 			ProviderProbe::forget();
 			$this->t->same( true, PreflightService::check( $this->admin )['ok'], '直した後' );
+		} );
+
+		$t->test( 'D-12', 'Claude API 接続（WordPress の HTTP API）：送信先・ヘッダー・リダイレクトなし・本文なし、応答の分類', function () {
+			$sent  = array();
+			$queue = array();
+			$fake  = static function ( $pre, $args, $url ) use ( &$sent, &$queue ) {
+				if ( ! str_contains( (string) $url, 'anthropic.com' ) ) {
+					return $pre;
+				}
+				$sent[] = array( 'url' => $url, 'args' => $args );
+				return array_shift( $queue );
+			};
+			$resp = static fn( int $code, array $body ) => array(
+				'headers'  => array( 'request-id' => 'req_test123' ),
+				'body'     => (string) wp_json_encode( $body ),
+				'response' => array( 'code' => $code, 'message' => '' ),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+			$err  = static fn( string $type ) => array( 'type' => 'error', 'error' => array( 'type' => $type, 'message' => 'raw upstream detail' ) );
+			$queue = array(
+				$resp( 200, array( 'id' => 'claude-opus-5-5', 'display_name' => 'Claude Opus 5.5', 'type' => 'model' ) ),
+				$resp( 401, $err( 'authentication_error' ) ),
+				$resp( 429, $err( 'rate_limit_error' ) ),
+				$resp( 529, $err( 'overloaded_error' ) ),
+				new \WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 15000 milliseconds' ),
+			);
+			add_filter( 'pre_http_request', $fake, 0, 3 );
+			try {
+				$key      = 'test-key-not-real-0000';
+				$provider = new \WpAiCase\AI\AnthropicProvider( new \WpAiCase\AI\AnthropicClient( $key ) );
+				$ok       = $provider->probe( 'claude-opus-5-5' );
+				$this->t->same( true, $ok->ok, '200' );
+				$this->t->same( 'Claude Opus 5.5', $ok->data['display_name'] ?? null, '表示名' );
+				$this->t->same( 'req_test123', $ok->request_id, 'request-id' );
+				$codes = array();
+				foreach ( array( 1, 2, 3, 4 ) as $i ) {
+					$codes[] = ErrorClassifier::from_provider( $provider->probe( 'claude-opus-5-5' ) )['code'] ?? null;
+				}
+				$this->t->same( array( 'AI-002', 'AI-005', 'AI-006', 'AI-007' ), $codes, '401/429/529/タイムアウト' );
+				$first = $sent[0];
+				$this->t->same( 'https://api.anthropic.com/v1/models/claude-opus-5-5', $first['url'], '送信先' );
+				$this->t->same( 'GET', $first['args']['method'], 'メソッド' );
+				$this->t->same( $key, $first['args']['headers']['x-api-key'] ?? null, 'x-api-key' );
+				$this->t->same( '2026-10-21', $first['args']['headers']['anthropic-version'] ?? null, 'anthropic-version' );
+				$this->t->same( 0, $first['args']['redirection'], 'リダイレクトを追わない' );
+				$this->t->same( true, $first['args']['sslverify'], '証明書を検証' );
+				$this->t->true( empty( $first['args']['body'] ), '本文を送らない（ユーザーのデータなし）' );
+				$this->t->same( 5, count( $sent ), '呼び出し回数' );
+				// 不正なモデル名は送らない。
+				$this->t->same( 404, $provider->probe( '../v1/messages' )->http_status, '不正なモデル名' );
+				$this->t->same( 5, count( $sent ), '不正なモデル名では通信しない' );
+				// キーがなければ通信しない。
+				$this->t->same( true, ( new \WpAiCase\AI\AnthropicProvider() )->probe( 'claude-opus-5-5' )->not_available, 'キーなし' );
+				$this->t->same( 5, count( $sent ), 'キーなしでは通信しない' );
+			} finally {
+				remove_filter( 'pre_http_request', $fake, 0 );
+			}
+		} );
+
+		$t->test( 'D-13', '接続テストの記録・状態にキーや外部APIの生の文面を残さない', function () {
+			Settings::$test_status = 'configured';
+			Settings::set_model( 'claude-opus-5-5' );
+			delete_transient( 'wp_ai_case_probe_cooldown' );
+			$fake = static function ( $pre, $args, $url ) {
+				return str_contains( (string) $url, 'anthropic.com' ) ? array(
+					'headers'  => array(),
+					'body'     => '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key raw-detail-xyz"}}',
+					'response' => array( 'code' => 401, 'message' => '' ),
+					'cookies'  => array(),
+					'filename' => null,
+				) : $pre;
+			};
+			add_filter( 'pre_http_request', $fake, 0, 3 );
+			try {
+				$key = 'test-key-not-real-1111';
+				$r   = ProviderProbe::run( $this->admin, true, new \WpAiCase\AI\AnthropicProvider( new \WpAiCase\AI\AnthropicClient( $key ) ) );
+			} finally {
+				remove_filter( 'pre_http_request', $fake, 0 );
+			}
+			$this->t->same( 'AI-002', $r['code'], '分類' );
+			$stored = (string) wp_json_encode( array( get_option( ProviderProbe::STATE_OPTION ), SupportLog::get( $r['support_id'] ), $r ) );
+			foreach ( array( $key, 'raw-detail-xyz', 'invalid x-api-key' ) as $bad ) {
+				$this->t->true( ! str_contains( $stored, $bad ), "記録に {$bad}" );
+			}
 		} );
 	}
 

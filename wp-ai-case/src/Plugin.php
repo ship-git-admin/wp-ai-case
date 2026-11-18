@@ -24,7 +24,6 @@ final class Plugin {
 
 		Support\Installer::maybe_install();
 		Rest\RestController::register();
-		Rest\AjaxController::register();
 		if ( is_admin() ) {
 			Admin\Menu::register();
 		}

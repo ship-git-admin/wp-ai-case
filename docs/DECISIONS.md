@@ -69,13 +69,18 @@
 - エラーは AI-001〜018 の固定文（`ErrorCatalog`）だけで表示し、詳細はサポートID（uuid v4）で管理者だけが参照する。記録する補足情報は許可したキーだけで、秘密・URL・パス・IP・PHP版を消す（`Redactor`）。
 - APIキーは `wp-config.php` の定数 `WP_AI_ANTHROPIC_API_KEY` だけから読む。管理画面での入力・保存・表示はしない。
 
-## D-015 顧客向けの通信は admin-ajax（REST に頼らない）
-- 共通テンプレートのサイトには、管理者以外の REST API を止める Code Snippet（oEmbed・Contact Form 7 以外は `rest_disabled`）が入っている。
-- そのため顧客向けの操作は `admin-ajax.php`（ログインCookie＋nonce＋施工事例の編集権限、未ログイン用は登録しない）で行う。REST は管理者専用の診断・サポート記録だけ。
-- ローカル診断で「管理者以外の REST が止められているか」を確認して表示する。
+## D-015 顧客向けの通信は REST（サイト側の制限に `wp-ai-case/` の例外を追加）— 2026-11-18 依頼者の決定
+- 共通テンプレートのサイトには、管理者以外の REST API を止める Code Snippet「RESTAPIセキュリティ設定」（oEmbed・Contact Form 7 以外は `rest_disabled`）が入っている。
+- 依頼者の決定により、この Snippet に `wp-ai-case/` の例外を追加して REST を使う（開発環境のサイトとデモサイトに適用済み。今後デモからコピーするサイトは引き継ぐ）。
+- 例外を追加しても、ログイン（Cookie＋`X-WP-Nonce`）と権限の確認はプラグインの `permission_callback` で行う。診断・サポート記録は管理者だけ。`/ping` もログインユーザーだけ。
+- ローカル診断で「管理者以外の REST が止められているか」を確認し、止められていれば `rest_transport` を「異常（AI-015）」として、追加する例外のコードを管理者画面に表示する。
+- 一時的に検討した admin-ajax 方式は取りやめた。
 
 ## D-016 接続テストの送信内容
 - 認証とモデルの到達性だけを確かめる最小の呼び出しにする（Models API でモデルを1件取得する想定）。トークンは消費しない見込みだが、レート消費の可能性があるため費用の注意と同意は残す。
 
-## D-017 Claude API の呼び出し方法（確認中）
-- 公式の PHP SDK は Composer で入れる形式。WordPress プラグインとして多数のサイトへ配布する場合の扱い（SDK を名前空間を変えて同梱するか、WordPress の HTTP API で直接呼ぶか）を依頼者に確認中。それまでは `PendingProvider`（外部通信なし）を使う。
+## D-017 Claude API は WordPress の HTTP API で直接呼ぶ — 2026-11-18 依頼者の決定
+- 公式 PHP SDK（Composer）は同梱しない。多数のサイトへ配る WordPress プラグインで、他プラグインとの依存の衝突（名前空間の付け替えが必要）を避けるため。使う機能も少ない（接続確認・画像つきの生成）。
+- `AnthropicClient`：送信先は `https://api.anthropic.com` に固定、`anthropic-version: 2026-10-21`、リダイレクトを追わない、証明書を検証、キーはヘッダーだけ（戻り値・ログに出さない）。
+- 接続テストは `GET /v1/models/{model}`。応答は分類コードと表示名だけを使い、生の本文は保存・表示しない。
+- その代わり、リクエストの組み立てと API 仕様の変更への追従はこちらで保守する（API バージョンは定数で1か所）。

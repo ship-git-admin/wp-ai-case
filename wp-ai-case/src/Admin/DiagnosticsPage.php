@@ -50,7 +50,7 @@ final class DiagnosticsPage {
 		'check_budget'            => '費用上限の管理は次の段階（C1-D）で実装予定',
 		'repair_acf_mapping'      => 'wp ai-case mapping status / propose で確認・再設定し、検証・承認',
 		'inspect_background_jobs' => 'WP-Cron が予定どおり動いていません。Basic認証・WAF・サーバーのCron設定を確認',
-		'inspect_rest_basic_waf'  => 'REST・Basic認証・WAF・HTTPS の設定を確認',
+		'inspect_rest_basic_waf'  => 'REST の制限（Code Snippet の例外）・Basic認証・WAF・HTTPS の設定を確認',
 		'review_provider_status'  => 'Anthropic の稼働状況を確認',
 	);
 
@@ -206,8 +206,9 @@ final class DiagnosticsPage {
 		echo '</form>';
 
 		if ( DiagnosticsService::rest_restricted_for_non_admins() ) {
-			echo '<h2>' . esc_html( 'REST API の制限' ) . '</h2>';
-			echo '<p>' . esc_html( 'このサイトでは、管理者以外の REST API がサイトの設定（Code Snippets 等）で止められています。このプラグインの顧客向け画面は admin-ajax を使うため影響しませんが、REST を使う他の機能には注意してください。' ) . '</p>';
+			echo '<h2>' . esc_html( 'REST API の制限（AI-015）' ) . '</h2>';
+			echo '<p>' . esc_html( '管理者以外の REST API がサイトの設定（Code Snippets 等）で止められているため、管理者以外のユーザーは施工事例AIを使えません。Code Snippet「RESTAPIセキュリティ設定」の「Contact Form7の除外」の下に、次の例外を追加してください（ログイン・権限の確認はプラグイン側で行います）。' ) . '</p>';
+			echo '<pre style="background:#f6f7f7;padding:12px;max-width:900px;overflow:auto">' . esc_html( "  //WP AI Case（施工事例AI）の除外：ログイン・nonce・権限はプラグイン側で確認する\n  if( strpos( \$namespaces, 'wp-ai-case/' ) === 1 ){\n    return \$result;\n  }" ) . '</pre>';
 		}
 
 		// バックグラウンド処理
