@@ -355,7 +355,7 @@ final class MappingPage {
 			echo '</ul></div>';
 		}
 
-		self::render_steps( $row, $s['state'] );
+		self::render_steps( $row, $s['state'], (string) $s['display'] );
 		self::render_actions( $service, $s, $row, $ctx, $back );
 
 		if ( $row ) {
@@ -369,7 +369,7 @@ final class MappingPage {
 	/**
 	 * @param array<string,mixed>|null $row
 	 */
-	private static function render_steps( ?array $row, string $state ): void {
+	private static function render_steps( ?array $row, string $state, string $display ): void {
 		$v     = $row['document']['validation'] ?? array();
 		$steps = array(
 			array( '1. 提案・構造検証', ! empty( $v['fixture_passed'] ) ),
@@ -383,7 +383,11 @@ final class MappingPage {
 			}
 		}
 		echo '<ol class="wpaic-map-steps">';
-		foreach ( $steps as [ $text, $done ] ) {
+		foreach ( $steps as $i => [ $text, $done ] ) {
+			if ( 2 === $i && 'recheck_required' === $display ) {
+				printf( '<li class="is-recheck">%s</li>', esc_html( $text . '（テーマ変更後の再確認が必要）' ) );
+				continue;
+			}
 			printf( '<li class="%s">%s%s</li>', $done ? 'is-done' : '', esc_html( $text ), $done ? esc_html( '（済）' ) : '' );
 		}
 		echo '</ol>';

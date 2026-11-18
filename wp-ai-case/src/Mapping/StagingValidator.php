@@ -119,6 +119,9 @@ final class StagingValidator {
 		foreach ( $this->marked( $mapping_id . ':' . $version ) as $id ) {
 			$out[ (string) get_post_meta( $id, self::MARK . '_hero', true ) ] = $id;
 		}
+		// 表示の順をそろえる（ビフォーアフター → ギャラリー → 1枚）。
+		$order = array_flip( self::HEROES );
+		uksort( $out, static fn( $a, $b ) => ( $order[ $a ] ?? 9 ) <=> ( $order[ $b ] ?? 9 ) );
 		return $out;
 	}
 

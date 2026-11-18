@@ -20,3 +20,7 @@
 	.wpaic-map-facts, .wpaic-map-facts tbody, .wpaic-map-facts tr, .wpaic-map-facts th, .wpaic-map-facts td { display: block; }
 	.wpaic-map-more table { display: block; overflow-x: auto; }
 }
+.wpaic-map-more code { word-break: break-all; white-space: normal; }
+.wpaic-map-more table { table-layout: fixed; width: 100%; }
+.wpaic-map-more td, .wpaic-map-more th { overflow-wrap: anywhere; }
+.wpaic-map-steps li.is-recheck { background: #fcf9e8; border-color: #dba617; color: #614a00; }
