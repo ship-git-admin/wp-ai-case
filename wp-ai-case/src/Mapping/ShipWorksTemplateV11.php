@@ -212,6 +212,7 @@ final class ShipWorksTemplateV11 {
 			if ( null === $before || null === $after ) {
 				continue;
 			}
+			// 見出しは小見出し行にだけ出す（ユニット側の SubTitle にも入れると二重に表示される）。
 			$compare[] = $this->subtitle_row( 'BeforeAfter_Label_SubtitleText', 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text', $section );
 			$compare[] = array(
 				'acf_fc_layout'                => 'EntryData_SectionBeforeAfter_Unit',
@@ -219,7 +220,6 @@ final class ShipWorksTemplateV11 {
 					'EntryData_PictureBeforeAfter_Pop'          => true,
 					'EntryData_PictureBeforeAfter_Trim'         => false,
 					'EntryData_PictureBeforeAfter_Trim02'       => false,
-					'EntryData_PictureBeforeAfter_SubTitle'     => $section['heading'],
 					'EntryData_PictureBeforeAfter_Image_Before' => $before['attachment_id'],
 					'EntryData_PictureBeforeAfter_Image_After'  => $after['attachment_id'],
 					'EntryData_PictureBeforeAfter_Txt_Before'   => $before['description'],
