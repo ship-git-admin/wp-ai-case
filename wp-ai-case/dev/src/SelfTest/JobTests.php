@@ -418,6 +418,40 @@ final class JobTests {
 			}
 		} );
 
+		$t->test( 'J-18', 'C1-UI02/03 写真45枚：20枚ずつ分割して解析（外部3回）→ 全体で再統合（1回）。全IDを1回ずつ・元の順、束をまたいでまとめる', function () use ( $images ) {
+			$tmp = $this->temp_images( 45 );
+			try {
+				MockProvider::$calls    = 0;
+				MockProvider::$payloads = array();
+				$s  = $this->service();
+				$in = $this->input( $images );
+				$in['images'] = array_map( static fn( $id, $i ) => array( 'attachment_id' => $id, 'original_position' => $i, 'caption' => '', 'user_phase_hint' => 'unknown' ), $tmp, array_keys( $tmp ) );
+				$job = $this->create( $s, $in );
+				$this->t->same( array( 0, 4 ), array( JobService::view( $job, $this->user )['progress']['step'], JobService::view( $job, $this->user )['progress']['total'] ), '進行状況（開始時）' );
+				$steps = 0;
+				while ( in_array( $job['status'], array( 'queued', 'analyzing' ), true ) && $steps < 10 ) {
+					$job = $s->tick( $job['job_id'], $this->user );
+					++$steps;
+				}
+				$this->t->same( array( 'proposal_ready', 4, 4 ), array( $job['status'], $steps, MockProvider::$calls ), '4回で完了（1回の進行で外部1回）' );
+				$modes = array_column( MockProvider::$payloads, 'mode' );
+				$this->t->same( array( 'analyze_only', 'analyze_only', 'analyze_only', 'compose_text_only' ), $modes, '分割→再統合' );
+				$this->t->same( array( 20, 20, 5 ), array_map( static fn( $p ) => count( $p['images'] ), array_slice( MockProvider::$payloads, 0, 3 ) ), '束の枚数' );
+				$compose = MockProvider::$payloads[3];
+				$this->t->same( 45, count( (array) $compose['prior_analysis'] ), '再統合に全写真の解析を渡す' );
+				$this->t->true( ! str_contains( (string) wp_json_encode( $compose ), 'base64' ), '再統合では画像データを送らない' );
+				$doc = $job['data']['versions'][0];
+				$this->t->same( $tmp, array_map( static fn( $i ) => (int) $i['attachment_id'], $doc['images'] ), '全IDを1回ずつ・元の順' );
+				$before = array_values( array_filter( $doc['sections'], static fn( $x ) => 'before' === $x['kind'] ) )[0] ?? array( 'image_ids' => array() );
+				$this->t->true( ! array_diff( array( $tmp[0], $tmp[20], $tmp[40] ), $before['image_ids'] ), '3つの束の施工前の写真を1つのセクションにまとめる（束をまたぐ再統合）' );
+				$s->cancel( $job['job_id'], $this->user );
+			} finally {
+				foreach ( $tmp as $id ) {
+					wp_delete_attachment( $id, true );
+				}
+			}
+		} );
+
 		$this->t->test( 'J-16', '試験中に Claude API への通信が 0 回', fn() => $this->t->same( 0, $this->external, '外部通信' ) );
 	}
 
@@ -650,6 +684,44 @@ final class JobTests {
 				wp_set_current_user( $this->user );
 			}
 		} );
+	}
+
+	/**
+	 * 試験用の一時画像（GDで作る小さな単色画像）。呼び出し側で削除する。
+	 *
+	 * @return int[]
+	 */
+	private function temp_images( int $n ): array {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/media.php';
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+		$ids  = array();
+		$keep = static fn( $sizes ) => array(); // サムネイルを作らない（速くするため）
+		add_filter( 'intermediate_image_sizes_advanced', $keep );
+		try {
+			for ( $i = 0; $i < $n; $i++ ) {
+				$img = imagecreatetruecolor( 320, 240 );
+				imagefill( $img, 0, 0, imagecolorallocate( $img, 40 + $i * 4, 120, 200 - $i * 3 ) );
+				imagestring( $img, 5, 10, 10, 'SELFTEST ' . ( $i + 1 ), imagecolorallocate( $img, 255, 255, 255 ) );
+				$tmp = wp_tempnam( 'wpaic-selftest.jpg' );
+				imagejpeg( $img, $tmp, 70 );
+				imagedestroy( $img );
+				$id = media_handle_sideload( array( 'name' => 'wpaic-selftest-' . ( $i + 1 ) . '.jpg', 'tmp_name' => $tmp ), 0, '【試験】一時画像' );
+				if ( is_wp_error( $id ) ) {
+					throw new \RuntimeException( '一時画像を作れません' );
+				}
+				update_post_meta( $id, Poc::MARK, '1' );
+				$ids[] = (int) $id;
+			}
+		} catch ( \Throwable $e ) {
+			foreach ( $ids as $id ) {
+				wp_delete_attachment( $id, true );
+			}
+			throw $e;
+		} finally {
+			remove_filter( 'intermediate_image_sizes_advanced', $keep );
+		}
+		return $ids;
 	}
 
 	private function cleanup(): void {
