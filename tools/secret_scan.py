@@ -3,7 +3,8 @@
 
 Git の追跡対象（未追跡を含む、.gitignore 除外は対象外）を走査し、
 APIキー・秘密鍵・サーバー名・実サイトのACFキーなどの混入を検出する。
-実行: python3 tools/secret_scan.py
+実行: python3 tools/secret_scan.py            （いまの作業ツリー）
+      python3 tools/secret_scan.py --history  （Git の全履歴の全ファイル）
 """
 import pathlib
 import re
@@ -39,14 +40,26 @@ def files():
     return [ROOT / p for p in out.split("\0") if p]
 
 
-def main() -> int:
+def load_patterns():
     patterns = dict(PATTERNS)
     if EXTRA_TERMS_FILE.exists():
         for line in EXTRA_TERMS_FILE.read_text(encoding="utf-8").splitlines():
             term = line.strip()
             if term and not term.startswith("#"):
                 patterns[f"追加語:{term[:2]}…"] = re.compile(re.escape(term), re.I)
+    return patterns
 
+
+def scan_text(text, patterns):
+    hits = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for name, pattern in patterns.items():
+            if pattern.search(line):
+                hits.append((lineno, name))
+    return hits
+
+
+def scan_tree(patterns):
     findings = []
     for path in files():
         rel = path.relative_to(ROOT).as_posix()
@@ -59,14 +72,51 @@ def main() -> int:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        for lineno, line in enumerate(text.splitlines(), 1):
-            for name, pattern in patterns.items():
-                if pattern.search(line):
-                    findings.append((rel, lineno, name))
+        findings += [(rel, lineno, name) for lineno, name in scan_text(text, patterns)]
+    return findings, len(files())
 
+
+def scan_history(patterns):
+    """全コミットに一度でも入ったファイル（blob）をすべて調べる。"""
+    objs = subprocess.run(["git", "rev-list", "--objects", "--all"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines()
+    paths = {}
+    for line in objs:
+        parts = line.split(" ", 1)
+        if len(parts) == 2:
+            paths.setdefault(parts[0], parts[1])
+    findings = []
+    checked = 0
+    self_rel = SELF.relative_to(ROOT).as_posix()
+    for sha, rel in sorted(paths.items(), key=lambda x: x[1]):
+        kind = subprocess.run(["git", "cat-file", "-t", sha], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        if kind != "blob":
+            continue
+        if any(part in rel for part in FORBIDDEN_PATHS):
+            findings.append((f"{rel}@{sha[:8]}", 0, "公開禁止のディレクトリ"))
+            continue
+        if rel == self_rel:
+            continue
+        data = subprocess.run(["git", "cat-file", "blob", sha], cwd=ROOT, capture_output=True).stdout
+        checked += 1
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        findings += [(f"{rel}@{sha[:8]}", lineno, name) for lineno, name in scan_text(text, patterns)]
+    return findings, checked
+
+
+def main() -> int:
+    patterns = load_patterns()
+    if "--history" in sys.argv[1:]:
+        findings, n = scan_history(patterns)
+        label = "history_blobs"
+    else:
+        findings, n = scan_tree(patterns)
+        label = "scanned"
     for rel, lineno, name in findings:
         print(f"FOUND {name}: {rel}:{lineno}")
-    print(f"scanned={len(files())} findings={len(findings)}")
+    print(f"{label}={n} findings={len(findings)}")
     return 1 if findings else 0
 
 

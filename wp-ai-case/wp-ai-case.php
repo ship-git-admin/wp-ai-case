@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       WP AI Case
- * Description:       施工事例（works）の下書きを、ACF の現在の定義に合わせて安全に作成・保存するためのプラグイン（開発中：C0/C1-A）。
+ * Description:       入力した一次情報と写真から、AI（Claude）で施工事例（works）の下書きを作成・修正し、ACF の現在の定義に合わせて安全に保存します。公開はしません（下書きだけ）。
  * Version:           0.1.0-dev
  * Requires at least: 6.5
  * Requires PHP:      8.1
@@ -9,6 +9,7 @@
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       wp-ai-case
+ * Update URI:        https://github.com/ship-git-admin/wp-ai-case/
  *
  * @package WpAiCase
  */
@@ -51,6 +52,9 @@ spl_autoload_register(
 		}
 	}
 );
+
+// 更新の確認（GitHub の公開リリース）。ACF の有無に関係なく登録する（更新で直せるように）。
+\WpAiCase\Support\Updater::register();
 
 register_activation_hook( __FILE__, array( \WpAiCase\Support\Installer::class, 'install' ) );
 register_deactivation_hook( __FILE__, array( \WpAiCase\Support\Maintenance::class, 'unschedule' ) );

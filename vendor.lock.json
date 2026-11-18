@@ -1,0 +1,21 @@
+{
+  "plugin-update-checker": {
+    "source": "https://github.com/YahnisElsts/plugin-update-checker",
+    "version": "v5.7",
+    "commit": "275a96a2a18d03c34c87f35cb68673c8c49ac3b1",
+    "license": "MIT (license.txt). Bundles Parsedown (MIT) and PucReadmeParser (from markjaquith/WordPress-Plugin-Readme-Parser)",
+    "path": "wp-ai-case/vendor/plugin-update-checker",
+    "included": [
+      "Puc/",
+      "css/",
+      "js/",
+      "languages/",
+      "vendor/",
+      "license.txt",
+      "load-v5p7.php",
+      "plugin-update-checker.php"
+    ],
+    "files": 116,
+    "tree_sha256": "e3a8b5ff1afd94a85e0e88bfff4833dce6744b31c9a5474b2987044a427b68bd"
+  }
+}

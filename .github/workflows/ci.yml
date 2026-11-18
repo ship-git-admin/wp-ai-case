@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -34,3 +36,19 @@ jobs:
         run: python3 tests/contracts/test_contracts.py
       - name: secret scan
         run: python3 tools/secret_scan.py
+      - name: secret scan (history)
+        run: python3 tools/secret_scan.py --history
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          tools: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: build and inspect ZIP (rehearsal version, not distributed)
+        run: python3 tools/build_release.py --rehearsal-version 0.0.0

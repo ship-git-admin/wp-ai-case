@@ -1,0 +1,43 @@
+name: release
+
+# タグ（vX.Y.Z）を push すると、検査してから配布用 ZIP を作り、「下書き（draft）」のリリースに添付する。
+# 公開（Publish release）は人が内容を確認してから GitHub の画面で行う。公開するまで各サイトには届かない。
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          tools: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema==4.23.0
+      - name: contract tests
+        run: python3 tests/contracts/test_contracts.py
+      - name: secret scan (tree)
+        run: python3 tools/secret_scan.py
+      - name: secret scan (history)
+        run: python3 tools/secret_scan.py --history
+      - name: build and inspect ZIP
+        run: python3 tools/build_release.py --expect-tag "${GITHUB_REF_NAME}"
+      - name: create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/wp-ai-case-${v}.zip" "dist/wp-ai-case-${v}.manifest.json" "dist/wp-ai-case-${v}.zip.sha256" \
+            --draft --title "${GITHUB_REF_NAME}" \
+            --notes "配布用 ZIP: wp-ai-case-${v}.zip（SHA-256 は .sha256 と manifest を参照）。変更点は CHANGELOG.md。公開前に docs/RELEASE.md の確認項目を済ませること。"
