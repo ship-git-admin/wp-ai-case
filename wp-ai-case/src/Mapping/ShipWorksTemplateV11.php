@@ -8,6 +8,7 @@
  * - 同じテンプレート名でも構造が違えば、保存時の照合で MAPPING_MISMATCH として止まる。
  * - 事実（工期・費用など）は入力された値（status=provided）だけを使い、推測で埋めない。
  * - 画像は「含める」ものをすべて、工程（before/during/after/unknown）ごとのユニットに入れる。
+ * - 関連付け（お客様の声・担当スタッフ・監修者）は紐付けがあるときだけ書く。
  *
  * @package WpAiCase
  */
@@ -128,15 +129,22 @@ final class ShipWorksTemplateV11 {
 
 		$fields['Format'] = $this->format( $doc['sections'], $by_phase );
 
-		$rel                                = $doc['relations'];
-		$fields['EntryData_RelatedData']    = array_values( $rel['customer_voice_post_ids'] );
-		$fields['entrydata_supervision']    = array_values( $rel['supervisor_post_ids'] );
-		$fields['EntryData_Staff']          = array();
-		foreach ( $rel['staff'] as $staff ) {
-			$fields['EntryData_Staff'][] = array(
-				'EntryData_Staff_Name'  => array( $staff['post_id'] ),
-				'EntryData_Staff_Voice' => $staff['comment'],
-			);
+		// 関連付けは紐付けがあるものだけ書く（空なら書かず、下書きはそのまま作る）。
+		$rel = $doc['relations'];
+		if ( $rel['customer_voice_post_ids'] ) {
+			$fields['EntryData_RelatedData'] = array_values( $rel['customer_voice_post_ids'] );
+		}
+		if ( $rel['supervisor_post_ids'] ) {
+			$fields['entrydata_supervision'] = array_values( $rel['supervisor_post_ids'] );
+		}
+		if ( $rel['staff'] ) {
+			$fields['EntryData_Staff'] = array();
+			foreach ( $rel['staff'] as $staff ) {
+				$fields['EntryData_Staff'][] = array(
+					'EntryData_Staff_Name'  => array( $staff['post_id'] ),
+					'EntryData_Staff_Voice' => $staff['comment'],
+				);
+			}
 		}
 
 		foreach ( array( 'title', 'h1', 'keywords', 'description' ) as $seo_key ) {

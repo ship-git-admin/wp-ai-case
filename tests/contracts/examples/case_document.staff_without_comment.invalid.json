@@ -84,7 +84,11 @@
     "customer_voice_post_ids": [
       501
     ],
-    "staff": [],
+    "staff": [
+      {
+        "post_id": 601
+      }
+    ],
     "supervisor_post_ids": [
       601
     ]

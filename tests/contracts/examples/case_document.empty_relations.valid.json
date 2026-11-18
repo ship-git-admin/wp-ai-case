@@ -1,0 +1,88 @@
+{
+  "document_id": "33333333-3333-4333-8333-333333333333",
+  "source_request_id": "11111111-1111-4111-8111-111111111111",
+  "post_type": "works",
+  "title": "浴室断熱リフォーム",
+  "summary": "合成事例の説明です",
+  "facts": {
+    "overview": {
+      "value": "合成データの浴室改修",
+      "status": "provided",
+      "source": "user_input",
+      "evidence_image_ids": []
+    },
+    "client_request": {
+      "value": "寒さを改善したい",
+      "status": "provided",
+      "source": "user_input",
+      "evidence_image_ids": []
+    },
+    "work_done": {
+      "value": "断熱材を追加して設備を交換",
+      "status": "provided",
+      "source": "user_input",
+      "evidence_image_ids": []
+    }
+  },
+  "images": [
+    {
+      "attachment_id": 11,
+      "original_position": 0,
+      "phase": "before",
+      "description": "既存の浴室",
+      "caption": "改修前",
+      "related_image_ids": [
+        12
+      ],
+      "included": true,
+      "uncertain": false
+    },
+    {
+      "attachment_id": 12,
+      "original_position": 1,
+      "phase": "after",
+      "description": "改修後の浴室",
+      "caption": "改修後",
+      "related_image_ids": [
+        11
+      ],
+      "included": true,
+      "uncertain": false
+    }
+  ],
+  "sections": [
+    {
+      "node_id": "section-1",
+      "kind": "before",
+      "heading": "施工前",
+      "body": "既存浴室の説明",
+      "image_ids": [
+        11
+      ],
+      "evidence_image_ids": [
+        11
+      ]
+    },
+    {
+      "node_id": "section-2",
+      "kind": "after",
+      "heading": "施工後",
+      "body": "設備の交換結果",
+      "image_ids": [
+        12
+      ],
+      "evidence_image_ids": [
+        12
+      ]
+    }
+  ],
+  "layout_intent": {
+    "hero": "before_after"
+  },
+  "status": "proposal",
+  "relations": {
+    "customer_voice_post_ids": [],
+    "staff": [],
+    "supervisor_post_ids": []
+  }
+}

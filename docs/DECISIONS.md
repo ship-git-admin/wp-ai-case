@@ -2,14 +2,14 @@
 
 設計キット v0.6 からの差分と、実装で決めたことを記録する。サイト固有の情報（ホスト名・実ACFのキー等）は書かない。
 
-## D-001 CaseDocument に `relations`（必須）を追加 — 契約 v0.6.1（2026-11-18）
-- 依頼者の指示：「関連付け系（お客様の声・担当スタッフ・監修者）は全て必須」。
-- `contracts/case_document.schema.json` に `relations` を追加し、トップレベルの必須項目にした。
-  - `customer_voice_post_ids`（1件以上）、`staff`（1件以上、`post_id` と `comment`）、`supervisor_post_ids`（1件以上）。
+## D-001 CaseDocument に `relations` を追加 — 契約 v0.6.1 → v0.6.2（2026-11-18）
+- 依頼者の指示：関連付け（お客様の声・担当スタッフ・監修者）は**対応必須**。ただし**紐付けがない場合は、そのまま下書きを作ってよい**（同日追記）。
+- `contracts/case_document.schema.json` の `relations` はオブジェクトとして必須。3つの配列はどれも空でよい（空＝紐付けなし）。
+  - `customer_voice_post_ids`、`staff`（`post_id` と `comment`）、`supervisor_post_ids`。
+- 空の関連付けは ACF に**書き込まない**（新規なら未設定、既存の下書きなら値を保持）。
+  - 担当スタッフは ACF 側で「最低1人」の設定。空のまま作った下書きは、管理画面で保存するときにスタッフの追加を求められる。
 - 値は AI が推測しない。利用者・編集者が選んだ投稿IDだけを受け付ける（入力側の `case_input` への反映は C1-C で行う）。
-- 投稿タイプ・公開状態・件数（ACF の min/max）は PHP が現在のACF定義と照合する。
-- 不足時は `MISSING_INPUT`（AI-017）で停止し、下書きを作らない。
-- **要確認**：お客様の声の投稿がまだない新規事例をどう扱うか（必須のままでよいか）。
+- 紐付けがあるときは、投稿タイプ・公開状態・件数（ACF の min/max）を PHP が現在のACF定義と照合する。
 
 ## D-002 共通テンプレートの既知マッピングは「名前」で持つ
 - `Mapping/ShipWorksTemplateV11` はフィールド名・レイアウト名だけを使い、field key は保存時に現在の定義から解決する。

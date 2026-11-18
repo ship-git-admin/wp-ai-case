@@ -64,18 +64,21 @@ final class UnitTests {
 			$doc['images'][1]['attachment_id'] = $doc['images'][0]['attachment_id'];
 			$this->t->throws_case( CaseError::INVALID_DOCUMENT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
 		} );
-		$t->test( 'U-DOC03', '関連付けがないと入力不足（AI-017）', function () {
+		$t->test( 'U-DOC03', '関連付けの項目（relations）そのものが無い文書は拒否', function () {
 			$doc = self::synthetic_doc();
 			unset( $doc['relations'] );
-			$e = $this->t->throws_case( CaseError::MISSING_INPUT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
-			$this->t->same( 'AI-017', $e->ai_code(), 'コード' );
+			$this->t->throws_case( CaseError::INVALID_DOCUMENT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
 		} );
-		$t->test( 'U-DOC04', '担当スタッフ0件・監修者0件・お客様の声0件を拒否', function () {
-			foreach ( array( 'staff', 'supervisor_post_ids', 'customer_voice_post_ids' ) as $key ) {
-				$doc                     = self::synthetic_doc();
-				$doc['relations'][ $key ] = array();
-				$this->t->throws_case( CaseError::MISSING_INPUT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
-			}
+		$t->test( 'U-DOC04', '紐付けなし（お客様の声・担当スタッフ・監修者が空）でも検証を通る。重複・型違いは拒否', function () {
+			$doc              = self::synthetic_doc();
+			$doc['relations'] = array( 'customer_voice_post_ids' => array(), 'staff' => array(), 'supervisor_post_ids' => array() );
+			( new CaseDocumentValidator() )->validate( $doc );
+			$doc                                  = self::synthetic_doc();
+			$doc['relations']['supervisor_post_ids'] = array( 601, 601 );
+			$this->t->throws_case( CaseError::INVALID_DOCUMENT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
+			$doc                       = self::synthetic_doc();
+			$doc['relations']['staff'] = array( array( 'post_id' => '601', 'comment' => '' ) );
+			$this->t->throws_case( CaseError::INVALID_DOCUMENT, fn() => ( new CaseDocumentValidator() )->validate( $doc ) );
 		} );
 		$t->test( 'U-DOC05', '費用・工期を画像から推測した値は拒否', function () {
 			$doc                  = self::synthetic_doc();
@@ -266,11 +269,19 @@ final class UnitTests {
 			$this->t->true( ! in_array( 'Outline_Label_Floor-plan', $layouts, true ), '推測の間取りが出ている' );
 			$this->t->true( in_array( 'Outline_Label_Period', $layouts, true ), '工期（入力済み）がない' );
 		} );
-		$t->test( 'U-MAP03', '関連付け（お客様の声・担当スタッフ・監修者）を必ず出す', function () use ( $tpl ) {
+		$t->test( 'U-MAP03', '紐付けがあれば関連付け（お客様の声・担当スタッフ・監修者）を出す', function () use ( $tpl ) {
 			$f = $tpl->build( self::synthetic_doc() )['fields'];
 			$this->t->same( array( 501 ), $f['EntryData_RelatedData'], 'お客様の声' );
 			$this->t->same( array( 601 ), $f['EntryData_Staff'][0]['EntryData_Staff_Name'], '担当スタッフ' );
 			$this->t->same( array( 601 ), $f['entrydata_supervision'], '監修者' );
+		} );
+		$t->test( 'U-MAP04', '紐付けがなければ関連付けのフィールドは書かない', function () use ( $tpl ) {
+			$doc              = self::synthetic_doc();
+			$doc['relations'] = array( 'customer_voice_post_ids' => array(), 'staff' => array(), 'supervisor_post_ids' => array() );
+			$f                = $tpl->build( $doc )['fields'];
+			foreach ( array( 'EntryData_RelatedData', 'EntryData_Staff', 'entrydata_supervision' ) as $name ) {
+				$this->t->true( ! array_key_exists( $name, $f ), "{$name} が出ている" );
+			}
 		} );
 	}
 }

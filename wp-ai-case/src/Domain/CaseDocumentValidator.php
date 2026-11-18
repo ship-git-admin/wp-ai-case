@@ -6,7 +6,7 @@
  * - 画像 attachment_id の重複なし、関連・根拠IDが画像集合に含まれる
  * - セクションが参照する画像は「含める」画像に限る
  * - 工期・費用は画像からの推測を認めない（捏造防止）
- * - 関連付け（お客様の声・担当スタッフ・監修者）は必須
+ * - 関連付け（お客様の声・担当スタッフ・監修者）は型・重複を確認する。空（紐付けなし）でもよい
  *
  * WordPress の投稿・ACF 定義との照合（存在・投稿タイプ・公開状態・min/max）は Acf\FieldAdapterRegistry が行う。
  *
@@ -37,19 +37,15 @@ final class CaseDocumentValidator {
 
 	/**
 	 * @param array<string,mixed> $doc
-	 * @throws CaseError 検証に失敗したとき（関連付け不足は MISSING_INPUT、それ以外は INVALID_DOCUMENT）。
+	 * @throws CaseError 検証に失敗したとき（INVALID_DOCUMENT）。
 	 */
 	public function validate( array $doc ): void {
-		$this->errors  = array();
-		$missing_input = false;
+		$this->errors = array();
 
 		$this->only_keys( $doc, self::TOP_KEYS, '$' );
 		foreach ( self::REQUIRED_TOP as $key ) {
 			if ( ! array_key_exists( $key, $doc ) ) {
 				$this->errors[] = "\$.{$key} がありません";
-				if ( 'relations' === $key ) {
-					$missing_input = true;
-				}
 			}
 		}
 
@@ -82,13 +78,13 @@ final class CaseDocumentValidator {
 		if ( array_key_exists( 'seo', $doc ) ) {
 			$this->seo( $doc['seo'] );
 		}
-		if ( array_key_exists( 'relations', $doc ) && ! $this->relations( $doc['relations'] ) ) {
-			$missing_input = true;
+		if ( array_key_exists( 'relations', $doc ) ) {
+			$this->relations( $doc['relations'] );
 		}
 
 		if ( $this->errors ) {
 			throw new CaseError(
-				$missing_input ? CaseError::MISSING_INPUT : CaseError::INVALID_DOCUMENT,
+				CaseError::INVALID_DOCUMENT,
 				'CaseDocument の検証に失敗しました',
 				array( 'errors' => $this->errors )
 			);
@@ -270,25 +266,19 @@ final class CaseDocumentValidator {
 		}
 	}
 
-	/**
-	 * @return bool 関連付けが必須条件を満たすか
-	 */
-	private function relations( mixed $rel ): bool {
-		$before = count( $this->errors );
-		if ( ! is_array( $rel ) || array_is_list( $rel ) ) {
+	private function relations( mixed $rel ): void {
+		if ( ! is_array( $rel ) || ( $rel && array_is_list( $rel ) ) ) {
 			$this->errors[] = '$.relations はオブジェクト';
-			return false;
+			return;
 		}
 		$this->only_keys( $rel, array( 'customer_voice_post_ids', 'staff', 'supervisor_post_ids' ), '$.relations' );
+		// 空配列は「紐付けなし」。下書きは作り、該当フィールドには書き込まない。
 		foreach ( array( 'customer_voice_post_ids', 'supervisor_post_ids' ) as $key ) {
 			$this->int_list( $rel[ $key ] ?? null, "\$.relations.{$key}" );
-			if ( empty( $rel[ $key ] ) ) {
-				$this->errors[] = "\$.relations.{$key} は1件以上必要です";
-			}
 		}
 		$staff = $rel['staff'] ?? null;
-		if ( ! is_array( $staff ) || ! array_is_list( $staff ) || count( $staff ) < 1 ) {
-			$this->errors[] = '$.relations.staff は1件以上必要です';
+		if ( ! is_array( $staff ) || ! array_is_list( $staff ) ) {
+			$this->errors[] = '$.relations.staff は配列';
 		} else {
 			$seen = array();
 			foreach ( $staff as $i => $row ) {
@@ -311,7 +301,6 @@ final class CaseDocumentValidator {
 				}
 			}
 		}
-		return count( $this->errors ) === $before;
 	}
 
 	private function int_list( mixed $list, string $path ): void {

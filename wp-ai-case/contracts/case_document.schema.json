@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ACF-independent canonical case document",
-  "$id": "https://example.invalid/wp-ai-case/v0.6.1/case_document.schema.json",
-  "description": "No ACF field keys or WordPress code in this document. PHP checks unique all image IDs, evidence refs, meaning of cost/duration and mapping to approved ACF bindings. v0.6.1: relations (required) added per 2026-11-18 decision.",
+  "$id": "https://example.invalid/wp-ai-case/v0.6.2/case_document.schema.json",
+  "description": "No ACF field keys or WordPress code in this document. PHP checks unique all image IDs, evidence refs, meaning of cost/duration and mapping to approved ACF bindings. v0.6.2: relations object required; each list may be empty (no link = draft is still created).",
   "type": "object",
   "properties": {
     "document_id": {
@@ -236,7 +236,7 @@
       "const": "proposal"
     },
     "relations": {
-      "description": "WP内の関連付け（お客様の声・担当スタッフ・監修者）。AIは推測せず、利用者または編集者が選んだ投稿IDのみ。ACFのmin/max・投稿タイプ・公開状態はPHPで実定義と照合する。",
+      "description": "WP内の関連付け（お客様の声・担当スタッフ・監修者）。AIは推測せず、利用者または編集者が選んだ投稿IDのみ。空配列は「紐付けなし」で、その場合は該当フィールドに書き込まない。ACFのmin/max・投稿タイプ・公開状態はPHPで実定義と照合する。",
       "type": "object",
       "properties": {
         "customer_voice_post_ids": {
@@ -245,12 +245,10 @@
             "type": "integer",
             "minimum": 1
           },
-          "uniqueItems": true,
-          "minItems": 1
+          "uniqueItems": true
         },
         "staff": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "object",
             "properties": {
@@ -275,8 +273,7 @@
             "type": "integer",
             "minimum": 1
           },
-          "uniqueItems": true,
-          "minItems": 1
+          "uniqueItems": true
         }
       },
       "required": [

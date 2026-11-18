@@ -202,12 +202,27 @@ final class IntegrationTests {
 			$this->t->true( null !== Snapshot::load_persisted( $main ), '手動復旧用のスナップショットが保存されていない' );
 		} );
 
-		$t->test( 'I-11', '関連付けが不足した入力では下書きを作らない', function () use ( $writer, $doc ) {
-			$bad                       = $doc;
-			$bad['relations']['staff'] = array();
-			$count                     = count( Poc::marked_posts( Plugin::POST_TYPE ) );
-			$this->t->throws_case( CaseError::MISSING_INPUT, fn() => $writer->create_from_document( $bad, $this->user_id, $this->opts() ) );
-			$this->t->same( $count, count( Poc::marked_posts( Plugin::POST_TYPE ) ), '投稿が増えた' );
+		$t->test( 'I-11', '紐付けなし（お客様の声・担当スタッフ・監修者が空）でも下書きを作り、関連付けは空のまま', function () use ( $writer, $doc ) {
+			$none              = $doc;
+			$none['relations'] = array( 'customer_voice_post_ids' => array(), 'staff' => array(), 'supervisor_post_ids' => array() );
+			$r                 = $writer->create_from_document( $none, $this->user_id, $this->opts( array( 'hero' => 'single' ) ) );
+			$id                = (int) $r['post_id'];
+			$this->created[]   = $id;
+			$this->t->same( 'ok', $r['readback'], '読み戻し' );
+			$this->t->same( array(), $r['related_posts'], '関連先' );
+			foreach ( array( 'EntryData_RelatedData', 'EntryData_Staff', 'entrydata_supervision' ) as $name ) {
+				$this->t->true( ! in_array( $name, $r['fields_written'], true ), "{$name} を書いた" );
+				$this->t->true( empty( get_field( $name, $id, false ) ), "{$name} に値がある" );
+			}
+		} );
+		$t->test( 'I-12', 'お客様の声だけ紐付けなし（担当スタッフ・監修者はあり）でも保存できる', function () use ( $writer, $doc ) {
+			$part                                         = $doc;
+			$part['relations']['customer_voice_post_ids'] = array();
+			$r                                            = $writer->create_from_document( $part, $this->user_id, $this->opts( array( 'hero' => 'single' ) ) );
+			$this->created[]                              = (int) $r['post_id'];
+			$this->t->same( 'ok', $r['readback'], '読み戻し' );
+			$this->t->true( in_array( 'EntryData_Staff', $r['fields_written'], true ) && in_array( 'entrydata_supervision', $r['fields_written'], true ), 'スタッフ・監修者を書いていない' );
+			$this->t->true( ! in_array( 'EntryData_RelatedData', $r['fields_written'], true ), 'お客様の声を書いた' );
 		} );
 	}
 
