@@ -84,4 +84,31 @@ final class Commands {
 		\WP_CLI::line( 'context_sha256: ' . $summary['context_sha256'] );
 		\WP_CLI\Utils\format_items( 'table', $summary['field_types'], array( 'type', 'count', 'support' ) );
 	}
+
+	/**
+	 * 定期の後片付けを実行する（ジョブの期限切れ・新規作成枠の回収・保存の中断からの復帰・古い記録の削除）。外部通信なし。
+	 *
+	 * WP-Cron が Basic認証などで動かない環境では、サーバーの cron から毎時実行する。
+	 *
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function maintenance( array $args, array $assoc ): void {
+		$r = \WpAiCase\Support\Maintenance::run( 'cli' );
+		\WP_CLI::success( (string) wp_json_encode( $r, JSON_UNESCAPED_UNICODE ) );
+	}
+
+	/**
+	 * 今月の新規作成枠と、AIの使用量（推定費用）を表示する。
+	 *
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function usage( array $args, array $assoc ): void {
+		$out = array(
+			'quota' => ( new \WpAiCase\Quota\QuotaService() )->summary(),
+			'cost'  => ( new \WpAiCase\Quota\CostGuard() )->summary(),
+		);
+		\WP_CLI::line( (string) wp_json_encode( $out, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
+	}
 }

@@ -314,8 +314,15 @@
 			h( 'p', { text: '写真に人の顔・表札・住所・車のナンバーなどが写っていないか確認してください。元の写真は変更しません。' } ),
 			h( 'label', {}, h( 'input', { type: 'checkbox', checked: !! f.consent, on: { change: function ( e ) { f.consent = e.target.checked; saveForm(); render(); } } } ), ' 上記を確認し、外部AIへの送信に同意します' ) ) );
 		var available = root.getAttribute( 'data-available' ) === '1' && ( ! state.options || state.options.available );
+		var quota = state.options && state.options.quota;
+		var noQuota = !! quota && quota.remaining < 1;
+		if ( quota ) {
+			wrap.appendChild( h( 'p', { class: noQuota ? 'wpaic-danger' : 'description', text: noQuota
+				? '今月の新規作成枠（' + quota.limit + '件）を使い切りました。' + quota.resets_on + ' から作成できます。既存の下書きの修正はできます。（AI-013）'
+				: '今月の新規作成：残り ' + quota.remaining + ' 件（' + quota.limit + '件中）。作成を始めると1件を予約し、下書きの保存に成功したら確定します（取り消すと戻ります）。' } ) );
+		}
 		wrap.appendChild( h( 'p', { class: 'wpaic-actions' },
-			h( 'button', { type: 'button', class: 'button button-primary button-hero', disabled: ! available || ! f.consent || state.busy, on: { click: submit } }, state.busy ? '送信中…' : 'AIで下書きを作成' ),
+			h( 'button', { type: 'button', class: 'button button-primary button-hero', disabled: ! available || noQuota || ! f.consent || state.busy, on: { click: submit } }, state.busy ? '送信中…' : 'AIで下書きを作成' ),
 			' ', h( 'button', { type: 'button', class: 'button-link', on: { click: resetForm } }, '入力をすべて消す' ) ) );
 		if ( ! available && state.options && state.options.error ) {
 			wrap.appendChild( errorBox( state.options.error ) );

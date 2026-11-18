@@ -53,4 +53,5 @@ spl_autoload_register(
 );
 
 register_activation_hook( __FILE__, array( \WpAiCase\Support\Installer::class, 'install' ) );
+register_deactivation_hook( __FILE__, array( \WpAiCase\Support\Maintenance::class, 'unschedule' ) );
 add_action( 'plugins_loaded', array( \WpAiCase\Plugin::class, 'boot' ), 20 );

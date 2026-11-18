@@ -46,10 +46,10 @@ final class DiagnosticsPage {
 		'none'                    => '—',
 		'configure_wp_config'     => '下の「APIキーの設定方法」に従って wp-config.php に定義し、ローカル診断を再実行',
 		'verify_model'            => '接続テストで、モデル（Claude Haiku 5.5）を利用できるか確認',
-		'check_quota'             => '新規作成枠の管理は次の段階（C1-D）で実装予定',
-		'check_budget'            => '費用上限の管理は次の段階（C1-D）で実装予定',
+		'check_quota'             => '今月の新規作成枠を使い切りました（下の「新規作成枠・使用量」を参照。翌月1日に戻ります）',
+		'check_budget'            => '推定費用が上限に近い／達しています（下の「新規作成枠・使用量」と Anthropic Console の使用量を確認）',
 		'repair_acf_mapping'      => '「AI施工事例 > マッピング」で状態を確認し、提案・検証・承認',
-		'inspect_background_jobs' => 'WP-Cron が予定どおり動いていません。Basic認証・WAF・サーバーのCron設定を確認',
+		'inspect_background_jobs' => 'WP-Cron または後片付けが動いていません。Basic認証・WAF を確認し、サーバーの cron で wp ai-case maintenance を毎時実行',
 		'inspect_rest_basic_waf'  => 'REST の制限（Code Snippet の例外）・Basic認証・WAF・HTTPS の設定を確認',
 		'review_provider_status'  => 'Anthropic の稼働状況を確認',
 	);
@@ -193,10 +193,44 @@ final class DiagnosticsPage {
 			echo '<pre style="background:#f6f7f7;padding:12px;max-width:900px;overflow:auto">' . esc_html( "  //WP AI Case（施工事例AI）の除外：ログイン・nonce・権限はプラグイン側で確認する\n  if( strpos( \$namespaces, 'wp-ai-case/' ) === 1 ){\n    return \$result;\n  }" ) . '</pre>';
 		}
 
+		// 新規作成枠・使用量
+		$quota = ( new \WpAiCase\Quota\QuotaService() )->summary();
+		$cost  = ( new \WpAiCase\Quota\CostGuard() )->summary();
+		$usd   = static fn( float $v ): string => '$' . number_format( $v, 4 );
+		echo '<h2>' . esc_html( '新規作成枠・使用量（今月：' . $quota['period'] . '）' ) . '</h2>';
+		echo '<table class="widefat striped" style="max-width:1000px"><tbody>';
+		printf( '<tr><th style="width:240px">%s</th><td>%s</td></tr>', esc_html( '新規作成枠' ), esc_html( sprintf( '%d 件中 %d 件使用（確定 %d・進行中 %d）、残り %d 件。%s に戻ります', $quota['limit'], $quota['committed'] + $quota['reserved'], $quota['committed'], $quota['reserved'], $quota['remaining'], $quota['resets_on'] ) ) );
+		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '推定費用（今月）' ), esc_html( $usd( (float) $cost['usd'] ) . ( $cost['monthly_limit'] > 0 ? ' ／ 上限 ' . $usd( (float) $cost['monthly_limit'] ) : '（上限なし）' ) ) );
+		foreach ( (array) $cost['by_kind'] as $k ) {
+			$label = array(
+				'create'  => '生成（写真20枚以下）',
+				'analyze' => '写真の分割解析',
+				'compose' => '分割後の再統合',
+				'revise'  => 'AIによる修正',
+				'probe'   => '接続テスト',
+			)[ (string) $k['kind'] ] ?? (string) $k['kind'];
+			printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '　' . $label ), esc_html( sprintf( '%d 回・入力 %s / 出力 %s トークン・%s', (int) $k['calls'], number_format( (int) $k['input_tokens'] ), number_format( (int) $k['output_tokens'] ), $usd( (float) $k['usd'] ) ) ) );
+		}
+		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '1回の依頼の上限（推定）' ), esc_html( $cost['request_limit'] > 0 ? $usd( (float) $cost['request_limit'] ) : '上限なし' ) );
+		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '今日のAIによる修正' ), esc_html( sprintf( '%d 回 ／ 上限 %s', $cost['daily_revise']['count'], $cost['daily_revise']['limit'] > 0 ? $cost['daily_revise']['limit'] . ' 回' : 'なし' ) ) );
+		printf( '<tr><th>%s</th><td>%s</td></tr>', esc_html( '料金表' ), esc_html( Settings::MODEL_LABEL . '（' . $cost['price_version'] . '）。推定費用は応答のトークン数から計算した目安で、請求額とは異なることがあります' ) );
+		echo '</tbody></table>';
+		echo '<p class="description">' . esc_html( '上限は wp-config.php の WP_AI_CASE_MONTHLY_QUOTA（新規作成枠）、WP_AI_CASE_MONTHLY_USD_LIMIT（月の推定費用）、WP_AI_CASE_REQUEST_USD_LIMIT（1回）、WP_AI_CASE_DAILY_REVISE_LIMIT（1日のAI修正）で変えられます。全体の実額は Anthropic の Workspace／組織の上限でも守ってください。' ) . '</p>';
+
 		// バックグラウンド処理
-		echo '<h2>' . esc_html( 'バックグラウンド処理（WP-Cron）' ) . '</h2>';
+		echo '<h2>' . esc_html( 'バックグラウンド処理（WP-Cron・後片付け）' ) . '</h2>';
 		$overdue = DiagnosticsService::overdue_cron_events();
-		printf( '<p>%s</p>', esc_html( 0 === $overdue ? '予定より大きく遅れている処理はありません。' : "予定より15分以上遅れている処理が {$overdue} 件あります。Basic認証などで WP-Cron の自己呼び出しが拒否されている可能性があります（AI-011）。" ) );
+		printf( '<p>%s</p>', esc_html( 0 === $overdue ? '予定より大きく遅れている WP-Cron の処理はありません。' : "予定より15分以上遅れている WP-Cron の処理が {$overdue} 件あります。Basic認証などで WP-Cron の自己呼び出しが拒否されている可能性があります（AI-011）。" ) );
+		$last = get_option( \WpAiCase\Support\Maintenance::LAST_RUN );
+		printf(
+			'<p>%s</p>',
+			esc_html(
+				is_array( $last )
+					? sprintf( '後片付け（期限切れのジョブ・新規作成枠の回収・保存の中断からの復帰・古い記録の削除）の前回の実行：%s（%s）', wp_date( 'Y-m-d H:i', (int) $last['at'] ), array( 'cron' => 'WP-Cron', 'cli' => 'WP-CLI', 'admin' => '管理画面' )[ (string) $last['via'] ] ?? (string) $last['via'] )
+					: '後片付けはまだ実行されていません。'
+			)
+		);
+		echo '<p class="description">' . esc_html( 'WP-Cron が動かない環境では、サーバーの cron から毎時「wp --path=<WordPressのディレクトリ> ai-case maintenance」を実行してください。管理者が管理画面を開いたときにも、6時間に1回まで自動で実行します。生成の処理（外部への送信）は、利用者の画面からの操作だけで進みます。' ) . '</p>';
 
 		// サポートID
 		echo '<h2>' . esc_html( 'サポートIDで記録を確認' ) . '</h2>';

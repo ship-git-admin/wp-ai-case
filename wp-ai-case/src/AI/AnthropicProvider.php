@@ -167,8 +167,10 @@ final class AnthropicProvider implements ProviderInterface {
 		$json  = $r['json'] ?? array();
 		$stop  = (string) ( $json['stop_reason'] ?? '' );
 		$usage = array(
-			'input_tokens'  => (int) ( $json['usage']['input_tokens'] ?? 0 ),
-			'output_tokens' => (int) ( $json['usage']['output_tokens'] ?? 0 ),
+			'input_tokens'                => (int) ( $json['usage']['input_tokens'] ?? 0 ),
+			'output_tokens'               => (int) ( $json['usage']['output_tokens'] ?? 0 ),
+			'cache_read_input_tokens'     => (int) ( $json['usage']['cache_read_input_tokens'] ?? 0 ),
+			'cache_creation_input_tokens' => (int) ( $json['usage']['cache_creation_input_tokens'] ?? 0 ),
 		);
 		if ( 'refusal' === $stop || 'max_tokens' === $stop ) {
 			return new ProviderResult( false, (int) $r['status'], 'refusal' === $stop ? 'refusal' : 'incomplete_output', false, false, false, $r['request_id'], array( 'usage' => $usage ) );

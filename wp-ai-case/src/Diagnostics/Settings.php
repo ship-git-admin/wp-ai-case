@@ -65,4 +65,34 @@ final class Settings {
 	public static function model(): string {
 		return self::MODEL;
 	}
+
+	/**
+	 * 新規作成枠（1サイト・暦月あたり）。wp-config.php の WP_AI_CASE_MONTHLY_QUOTA か、フィルターで変えられる。
+	 */
+	public static function monthly_quota(): int {
+		return max( 0, (int) apply_filters( 'wp_ai_case_monthly_quota', self::constant_number( 'WP_AI_CASE_MONTHLY_QUOTA', 5 ) ) );
+	}
+
+	/**
+	 * 費用の上限（USD・推定）。月の合計・1回の依頼・1日のAI修正回数。0 以下なら上限なし。
+	 * 実額の請求上限は Anthropic の Workspace／組織の上限で別に守る（このサイトだけの集計では全体を止められない）。
+	 */
+	public static function monthly_usd_limit(): float {
+		return (float) apply_filters( 'wp_ai_case_monthly_usd_limit', self::constant_number( 'WP_AI_CASE_MONTHLY_USD_LIMIT', 1.0 ) );
+	}
+
+	public static function request_usd_limit(): float {
+		return (float) apply_filters( 'wp_ai_case_request_usd_limit', self::constant_number( 'WP_AI_CASE_REQUEST_USD_LIMIT', 0.2 ) );
+	}
+
+	public static function daily_revise_limit(): int {
+		return (int) apply_filters( 'wp_ai_case_daily_revise_limit', self::constant_number( 'WP_AI_CASE_DAILY_REVISE_LIMIT', 50 ) );
+	}
+
+	private static function constant_number( string $name, float|int $default ): float|int {
+		if ( defined( $name ) && is_numeric( constant( $name ) ) ) {
+			return is_int( $default ) ? (int) constant( $name ) : (float) constant( $name );
+		}
+		return $default;
+	}
 }

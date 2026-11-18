@@ -60,6 +60,8 @@ final class ProviderProbe {
 		$support_id = wp_generate_uuid4();
 
 		$result = $provider->probe( $model );
+		// 接続テストは新規作成枠に数えないが、外部呼び出しとして使用量の記録には残す（モデルの確認はトークンを使わない）。
+		( new \WpAiCase\Quota\CostGuard() )->record( 'probe', $model, null, 0, array(), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
 		if ( $result->not_available ) {
 			$state = array( 'outcome' => 'not_available', 'code' => '', 'http_class' => 'none' );
 		} else {

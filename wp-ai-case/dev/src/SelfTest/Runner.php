@@ -23,7 +23,7 @@ final class Runner {
 	 * ## OPTIONS
 	 *
 	 * [--group=<group>]
-	 * : unit / mapping / diag / jobs / integration / all
+	 * : unit / mapping / diag / jobs / quota / integration / all
 	 * ---
 	 * default: all
 	 * ---
@@ -40,11 +40,27 @@ final class Runner {
 	public function __invoke( array $args, array $assoc ): void {
 		$group = (string) ( $assoc['group'] ?? 'all' );
 		$t     = new Tester();
+		// 試験で作る予約・使用量は試験用の月に入れ、実サイトの今月の枠・費用には数えない（最後に消す）。
+		\WpAiCase\Quota\QuotaService::$period_override = '2099-12';
+		\WpAiCase\Quota\QuotaService::$limit_override  = 1000;
+		try {
+			$this->groups( $group, $t );
+		} finally {
+			global $wpdb;
+			$wpdb->query( 'DELETE FROM ' . \WpAiCase\Support\Installer::quota_table() . " WHERE period = '2099-12'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
+			$wpdb->query( 'DELETE FROM ' . \WpAiCase\Support\Installer::usage_table() . " WHERE period = '2099-12'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
+			\WpAiCase\Quota\QuotaService::$period_override = null;
+			\WpAiCase\Quota\QuotaService::$limit_override  = null;
+		}
+		$this->report( $t, $assoc );
+	}
+
+	private function groups( string $group, Tester $t ): void {
 		if ( in_array( $group, array( 'unit', 'all' ), true ) ) {
 			( new UnitTests( $t ) )->run();
 		}
 		$user_id = get_current_user_id();
-		if ( in_array( $group, array( 'mapping', 'diag', 'jobs', 'integration', 'all' ), true ) && $user_id < 1 ) {
+		if ( in_array( $group, array( 'mapping', 'diag', 'jobs', 'quota', 'integration', 'all' ), true ) && $user_id < 1 ) {
 			\WP_CLI::error( 'mapping / diag / jobs / integration には --user=<管理者> が必要です' );
 		}
 		if ( in_array( $group, array( 'diag', 'all' ), true ) ) {
@@ -56,10 +72,18 @@ final class Runner {
 		if ( in_array( $group, array( 'jobs', 'all' ), true ) ) {
 			( new JobTests( $t, $user_id ) )->run();
 		}
+		if ( in_array( $group, array( 'quota', 'all' ), true ) ) {
+			( new QuotaTests( $t, $user_id ) )->run();
+		}
 		if ( in_array( $group, array( 'integration', 'all' ), true ) ) {
 			( new IntegrationTests( $t, $user_id ) )->run();
 		}
+	}
 
+	/**
+	 * @param array<string,string> $assoc
+	 */
+	private function report( Tester $t, array $assoc ): void {
 		$results = $t->results();
 		if ( 'json' === ( $assoc['format'] ?? 'table' ) ) {
 			\WP_CLI::line( (string) wp_json_encode( $results, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );

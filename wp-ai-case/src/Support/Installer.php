@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class Installer {
 
-	public const DB_VERSION        = '3';
+	public const DB_VERSION        = '4';
 	private const DB_VERSION_OPTION = 'wp_ai_case_db_version';
 	private const SITE_SCOPE_OPTION = 'wp_ai_case_site_scope_id';
 
@@ -28,6 +28,16 @@ final class Installer {
 	public static function jobs_table(): string {
 		global $wpdb;
 		return $wpdb->prefix . 'wpaic_jobs';
+	}
+
+	public static function quota_table(): string {
+		global $wpdb;
+		return $wpdb->prefix . 'wpaic_quota';
+	}
+
+	public static function usage_table(): string {
+		global $wpdb;
+		return $wpdb->prefix . 'wpaic_usage';
 	}
 
 	public static function support_log_table(): string {
@@ -124,6 +134,46 @@ final class Installer {
   UNIQUE KEY job_id (job_id),
   UNIQUE KEY idempotency_key (idempotency_key),
   KEY user_status (user_id,status)
+) {$charset};"
+		);
+		$quota = self::quota_table();
+		dbDelta(
+			"CREATE TABLE {$quota} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  idempotency_key char(36) NOT NULL,
+  period char(7) NOT NULL,
+  status varchar(16) NOT NULL,
+  job_id char(36) DEFAULT NULL,
+  user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+  post_id bigint(20) unsigned DEFAULT NULL,
+  reserved_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY idempotency_key (idempotency_key),
+  KEY period_status (period,status)
+) {$charset};"
+		);
+		$usage = self::usage_table();
+		dbDelta(
+			"CREATE TABLE {$usage} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  period char(7) NOT NULL,
+  day date NOT NULL,
+  job_id char(36) DEFAULT NULL,
+  kind varchar(16) NOT NULL,
+  model varchar(64) NOT NULL,
+  images int(10) unsigned NOT NULL DEFAULT 0,
+  input_tokens int(10) unsigned NOT NULL DEFAULT 0,
+  output_tokens int(10) unsigned NOT NULL DEFAULT 0,
+  cache_read_tokens int(10) unsigned NOT NULL DEFAULT 0,
+  cache_write_tokens int(10) unsigned NOT NULL DEFAULT 0,
+  usd_estimate decimal(12,6) NOT NULL DEFAULT 0,
+  price_version varchar(40) NOT NULL DEFAULT '',
+  outcome varchar(24) NOT NULL DEFAULT '',
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY period_kind (period,kind),
+  KEY day_kind (day,kind)
 ) {$charset};"
 		);
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, false );

@@ -12,7 +12,8 @@
  * 既存の下書きの修正（mode=revise_draft）は、この機能で保存した下書きだけが対象。開いた時点の文書から始め、
  * 保存では前回から変わった部分だけを書く（人が編集画面で変えた部分に重なる修正は保存しない）。
  *
- * 新規作成枠（月5件）・費用の上限は C1-D で追加する。
+ * 新規作成枠：作成の開始時に予約し、新しい下書きの保存成功で確定、取消し・期限切れで戻す（QuotaService）。
+ * 費用：外部呼び出しの前に推定費用で上限を確かめ（超えるなら呼ばない・AI-014）、呼んだ後に使用量を記録する（CostGuard）。
  *
  * @package WpAiCase
  */
@@ -31,6 +32,8 @@ use WpAiCase\Draft\DraftState;
 use WpAiCase\Draft\DraftWriter;
 use WpAiCase\Mapping\MappingService;
 use WpAiCase\Plugin;
+use WpAiCase\Quota\CostGuard;
+use WpAiCase\Quota\QuotaService;
 use WpAiCase\Support\CaseError;
 
 defined( 'ABSPATH' ) || exit;
@@ -45,11 +48,15 @@ final class JobService {
 	private JobRepository $repo;
 	private ?ProviderInterface $provider;
 	private MappingService $mappings;
+	private QuotaService $quota;
+	private CostGuard $cost;
 
 	public function __construct( ?JobRepository $repo = null, ?ProviderInterface $provider = null, ?MappingService $mappings = null ) {
 		$this->repo     = $repo ?? new JobRepository();
 		$this->provider = $provider;
 		$this->mappings = $mappings ?? new MappingService();
+		$this->quota    = new QuotaService();
+		$this->cost     = new CostGuard();
 	}
 
 	public function repository(): JobRepository {
@@ -86,6 +93,28 @@ final class JobService {
 		} catch ( CaseError $e ) {
 			throw JobError::from_case( $e, 'mapping_not_ready', 503 );
 		}
+		// 新規作成枠の予約（ここまでの確認で止まった場合は枠を使わない）。
+		try {
+			$this->quota->reserve( $input['idempotency_key'], $user );
+		} catch ( CaseError $e ) {
+			throw JobError::from_case( $e, 'quota_' . $e->reason, CaseError::QUOTA_EXCEEDED === $e->reason ? 429 : 503 );
+		}
+		try {
+			$job = $this->insert_create_job( $input, $user, $mapping );
+		} catch ( \Throwable $e ) {
+			$this->quota->release( $input['idempotency_key'] );
+			throw $e;
+		}
+		$this->quota->attach_job( $input['idempotency_key'], (string) $job['job_id'] );
+		return $job;
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 * @param array<string,mixed> $mapping
+	 * @return array<string,mixed>
+	 */
+	private function insert_create_job( array $input, int $user, array $mapping ): array {
 		return $this->repo->insert(
 			$input['idempotency_key'],
 			$user,
@@ -265,9 +294,10 @@ final class JobService {
 		if ( ! $job || ( (int) $job['user_id'] !== $user && ! user_can( $user, 'manage_options' ) ) ) {
 			throw JobError::code( 'AI-018', 'job_not_found', 404 );
 		}
-		if ( ! in_array( $job['status'], array( 'committed', 'cancelled', 'expired' ), true ) && strtotime( $job['expires_at'] . ' UTC' ) < time() ) {
+		if ( ! in_array( $job['status'], array( 'committed', 'cancelled', 'expired', 'saving' ), true ) && strtotime( $job['expires_at'] . ' UTC' ) < time() ) {
 			try {
 				$job = $this->repo->compare_and_set( $job, array( 'status' => 'expired', 'job_generation' => $job['job_generation'] + 1, 'lease_until' => null ) );
+				$this->quota->release( (string) $job['idempotency_key'] );
 			} catch ( CaseError $e ) {
 				$job = $this->repo->get( $job_id );
 			}
@@ -307,6 +337,15 @@ final class JobService {
 			return $this->repo->compare_and_set( $job, array( 'status' => 'failed', 'data' => $data, 'lease_until' => null ) );
 		}
 
+		// 費用の上限（推定）。超えるなら送らずに止める（上限を見直した後、同じ画面から再試行できる）。
+		$estimate = CostGuard::estimate( (string) $payload['model'], count( $payload['images'] ), self::text_bytes( $payload ) );
+		try {
+			$this->cost->check( 'full' === $kind ? 'create' : ( 'compose' === $kind ? 'compose' : 'analyze' ), $estimate['usd'] );
+		} catch ( CaseError $e ) {
+			$data['error'] = SafeErrorPresenter::from_case_error( $e, 'customer', 'cost_guard' );
+			return $this->repo->compare_and_set( $job, array( 'status' => 'failed', 'data' => $data, 'lease_until' => null ) );
+		}
+
 		$data['provider'] = array( 'state' => 'sending', 'attempt' => wp_generate_uuid4(), 'started_at' => time(), 'step' => (int) $data['step'] );
 		$data['error']    = null;
 		$job              = $this->repo->compare_and_set( $job, array( 'status' => 'analyzing', 'data' => $data ) );
@@ -315,6 +354,7 @@ final class JobService {
 			@set_time_limit( self::LEASE ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		}
 		$result = $this->provider()->compose( $payload );
+		$this->cost->record( 'full' === $kind ? 'create' : ( 'compose' === $kind ? 'compose' : 'analyze' ), (string) $payload['model'], $job_id, count( $payload['images'] ), (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
 
 		// 呼び出し中に取消し・再試行があれば、この結果は捨てる。
 		$fresh = $this->repo->get( $job_id );
@@ -373,7 +413,9 @@ final class JobService {
 		if ( ! in_array( $job['status'], array( 'queued', 'analyzing', 'proposal_ready', 'failed', 'needs_recovery' ), true ) ) {
 			throw JobError::code( 'AI-012', 'cancel_not_allowed', 409 );
 		}
-		return $this->repo->compare_and_set( $job, array( 'status' => 'cancelled', 'job_generation' => $job['job_generation'] + 1, 'lease_until' => null ) );
+		$job = $this->repo->compare_and_set( $job, array( 'status' => 'cancelled', 'job_generation' => $job['job_generation'] + 1, 'lease_until' => null ) );
+		$this->quota->release( (string) $job['idempotency_key'] );
+		return $job;
 	}
 
 	/**
@@ -429,15 +471,20 @@ final class JobService {
 		if ( ! $pre['ok'] ) {
 			throw new JobError( $pre['error'], 503 );
 		}
-		$doc    = $job['data']['versions'][ $base_index ];
-		$result = $this->provider()->revise(
-			array(
-				'model'            => Settings::model(),
-				'document'         => $doc,
-				'allowed_sections' => $allowed,
-				'instruction'      => $instruction,
-			)
+		$doc     = $job['data']['versions'][ $base_index ];
+		$payload = array(
+			'model'            => Settings::model(),
+			'document'         => $doc,
+			'allowed_sections' => $allowed,
+			'instruction'      => $instruction,
 		);
+		try {
+			$this->cost->check( 'revise', CostGuard::estimate( Settings::model(), 0, strlen( (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) )['usd'] );
+		} catch ( CaseError $e ) {
+			throw JobError::from_case( $e, 'cost_guard', 429 );
+		}
+		$result = $this->provider()->revise( $payload );
+		$this->cost->record( 'revise', Settings::model(), $job_id, 0, (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
 		$fresh = $this->repo->get( $job_id );
 		if ( ! $fresh || (int) $fresh['job_generation'] !== (int) $job['job_generation'] || 'proposal_ready' !== $fresh['status'] || (int) $fresh['data']['index'] !== $base_index ) {
 			throw JobError::code( 'AI-012', 'revise_stale', 409 );
@@ -509,6 +556,9 @@ final class JobService {
 		}
 		$data['error']         = null;
 		$data['saved_changes'] = $revise ? DraftState::labels( (array) ( $result['changed_slots'] ?? array() ) ) : null;
+		if ( ! $revise ) {
+			$this->quota->commit( (string) $job['idempotency_key'], (int) $result['post_id'] );
+		}
 		return $this->repo->compare_and_set( $job, array( 'status' => 'committed', 'post_id' => (int) $result['post_id'], 'data' => $data ) );
 	}
 
@@ -672,6 +722,19 @@ final class JobService {
 		$data['last_change'] = array( 'by' => $by, 'changed' => $changed );
 		$data['error']    = null;
 		return $this->repo->compare_and_set( $job, array( 'data' => $data ) );
+	}
+
+	/**
+	 * 見積もり用：画像データを除いた依頼の文章の大きさ（バイト）。
+	 *
+	 * @param array<string,mixed> $payload
+	 */
+	private static function text_bytes( array $payload ): int {
+		$copy = $payload;
+		foreach ( (array) ( $copy['images'] ?? array() ) as $i => $img ) {
+			unset( $copy['images'][ $i ]['data'] );
+		}
+		return strlen( (string) wp_json_encode( $copy, JSON_UNESCAPED_UNICODE ) );
 	}
 
 	private function provider(): ProviderInterface {

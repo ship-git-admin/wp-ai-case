@@ -27,8 +27,8 @@ final class DiagnosticsService {
 		$checks = array(
 			self::api_key(),
 			self::model(),
-			array( 'check' => 'monthly_quota', 'status' => 'unknown', 'action_code' => 'check_quota' ),
-			array( 'check' => 'cost_guard', 'status' => 'unknown', 'action_code' => 'check_budget' ),
+			self::quota(),
+			self::cost(),
 			self::mapping(),
 			self::background_jobs(),
 			self::rest_transport(),
@@ -108,9 +108,43 @@ final class DiagnosticsService {
 	 *
 	 * @return array<string,string>
 	 */
+	/**
+	 * @return array<string,string>
+	 */
+	private static function quota(): array {
+		$q = ( new \WpAiCase\Quota\QuotaService() )->summary();
+		if ( $q['remaining'] < 1 ) {
+			return array( 'check' => 'monthly_quota', 'status' => 'blocked', 'error_code' => 'AI-013', 'action_code' => 'check_quota' );
+		}
+		return array( 'check' => 'monthly_quota', 'status' => 'ok', 'action_code' => 'none' );
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private static function cost(): array {
+		$limit = Settings::monthly_usd_limit();
+		$used  = ( new \WpAiCase\Quota\CostGuard() )->month_usd();
+		if ( $limit > 0 && $used >= $limit ) {
+			return array( 'check' => 'cost_guard', 'status' => 'blocked', 'error_code' => 'AI-014', 'action_code' => 'check_budget' );
+		}
+		if ( $limit > 0 && $used >= $limit * 0.8 ) {
+			return array( 'check' => 'cost_guard', 'status' => 'warning', 'action_code' => 'check_budget' );
+		}
+		return array( 'check' => 'cost_guard', 'status' => 'ok', 'action_code' => 'none' );
+	}
+
+	/**
+	 * 後片付け（Maintenance）が2日以上動いていない、または予定より遅れた Cron がある。
+	 */
+	public static function maintenance_overdue(): bool {
+		$last = get_option( \WpAiCase\Support\Maintenance::LAST_RUN );
+		return ! is_array( $last ) || (int) ( $last['at'] ?? 0 ) < time() - 2 * DAY_IN_SECONDS;
+	}
+
 	private static function background_jobs(): array {
 		$overdue = self::overdue_cron_events();
-		if ( $overdue > 0 ) {
+		if ( $overdue > 0 || self::maintenance_overdue() ) {
 			return array( 'check' => 'background_jobs', 'status' => 'warning', 'error_code' => 'AI-011', 'action_code' => 'inspect_background_jobs' );
 		}
 		return array( 'check' => 'background_jobs', 'status' => 'ok', 'action_code' => 'none' );

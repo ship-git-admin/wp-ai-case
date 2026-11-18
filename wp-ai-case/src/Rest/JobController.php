@@ -65,6 +65,7 @@ final class JobController {
 			'voices'     => $list( 'voice' ),
 			'staff'      => $list( 'staff' ),
 			'sections'   => PatchApplier::SECTIONS,
+			'quota'      => array_intersect_key( ( new \WpAiCase\Quota\QuotaService() )->summary(), array_flip( array( 'limit', 'remaining', 'resets_on' ) ) ),
 		);
 	}
 
