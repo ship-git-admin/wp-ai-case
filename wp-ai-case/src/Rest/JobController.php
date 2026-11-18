@@ -45,7 +45,15 @@ final class JobController {
 		$list = static function ( string $type ): array {
 			$out = array();
 			foreach ( get_posts( array( 'post_type' => $type, 'post_status' => 'publish', 'posts_per_page' => 200, 'orderby' => 'title', 'order' => 'ASC' ) ) as $p ) {
-				$out[] = array( 'id' => (int) $p->ID, 'title' => get_the_title( $p ) );
+				// 画面は textContent で表示するので、HTML実体参照（&#8230; など）を文字に戻し、タグを除く。
+				$out[] = array( 'id' => (int) $p->ID, 'title' => wp_strip_all_tags( html_entity_decode( get_the_title( $p ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
+			}
+			// 同じ名前が複数あると画面で見分けられないので、重複する名前にだけ ID を添える。
+			$count = array_count_values( array_column( $out, 'title' ) );
+			foreach ( $out as $i => $o ) {
+				if ( $count[ $o['title'] ] > 1 ) {
+					$out[ $i ]['title'] = $o['title'] . '（ID: ' . $o['id'] . '）';
+				}
 			}
 			return $out;
 		};

@@ -20,7 +20,7 @@ final class ErrorCatalog {
 		'AI-001' => array( 'AI機能の準備が完了していません。サイト管理者へお問い合わせください。', 'Claude APIキーが未設定です。wp-config.php に WP_AI_ANTHROPIC_API_KEY を定義し、「ローカル診断を再実行」してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
 		'AI-002' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', 'Claude API が認証を拒否しました（401）。キーの失効・Workspace・設定値を確認し、必要ならキーを再発行して wp-config.php を更新してください。', false, 'contact_admin', 'fix_config_and_retry', 'しない' ),
 		'AI-003' => array( 'AI機能の接続設定に問題があります。サイト管理者へお問い合わせください。', 'Claude API がアクセスを拒否しました（403/402）。Workspace の権限・モデルの利用許可・請求状態を Anthropic Console で確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
-		'AI-004' => array( 'AI機能の設定確認待ちです。サイト管理者へお問い合わせください。', '使用するモデルが未設定か、利用できないモデルです。「接続・診断」で検証済みのモデルを選んでください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
+		'AI-004' => array( 'AI機能の設定確認待ちです。サイト管理者へお問い合わせください。', '使用するモデル（Claude Haiku 5.5、固定）を、このAPIキーの Workspace で利用できません。Anthropic Console でモデルの利用許可を確認し、「接続・診断」の接続テストで確認してください。', false, 'contact_admin', 'open_admin_diagnostics', 'しない' ),
 		'AI-005' => array( 'AI機能が一時的に使用できません。しばらくしてから再試行してください。', 'Claude API の利用制限（429）に達しました。レート制限か、Workspace／組織の上限かを Console の使用状況で確認してください。', true, 'retry_later', 'open_admin_diagnostics', '条件付・遅延' ),
 		'AI-006' => array( 'AI機能が一時的に混み合っています。時間をおいて再試行してください。', 'Claude API 側の一時的な障害・過負荷（5xx/529）です。時間をおいて再試行してください。', true, 'retry_later', 'retry_later', '冪等性確認後' ),
 		'AI-007' => array( 'AI機能との通信を確認中です。しばらくしてから再試行してください。', 'サーバーから Claude API への通信に失敗しました（DNS・TLS・タイムアウト等）。サーバーの外向きHTTPS通信を確認してください。', true, 'retry_later', 'open_admin_diagnostics', '安全性確認後' ),

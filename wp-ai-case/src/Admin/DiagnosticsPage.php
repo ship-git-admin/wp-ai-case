@@ -124,10 +124,10 @@ final class DiagnosticsPage {
 
 		// 概要と各項目
 		printf( '<h2>%s</h2><p><strong>%s</strong></p>', esc_html( 'ローカル診断' ), esc_html( (string) $diag['safe_admin_message'] ) );
-		echo '<table class="widefat striped" style="max-width:1000px"><thead><tr><th>項目</th><th>状態</th><th>コード</th><th>対応</th></tr></thead><tbody>';
+		echo '<table class="widefat striped" style="max-width:1000px"><thead><tr><th>項目</th><th style="white-space:nowrap">状態</th><th style="white-space:nowrap">コード</th><th>対応</th></tr></thead><tbody>';
 		foreach ( $diag['checks'] as $c ) {
 			printf(
-				'<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+				'<tr><td>%s</td><td style="white-space:nowrap">%s</td><td style="white-space:nowrap">%s</td><td>%s</td></tr>',
 				esc_html( self::CHECK_LABELS[ $c['check'] ] ?? $c['check'] ),
 				esc_html( self::STATUS_LABELS[ $c['status'] ] ?? $c['status'] ),
 				esc_html( (string) ( $c['error_code'] ?? '' ) ),
@@ -207,9 +207,9 @@ final class DiagnosticsPage {
 		submit_button( '確認', 'secondary', 'submit', false );
 		echo '</form>';
 
-		echo '<h2>' . esc_html( 'エラーコード一覧' ) . '</h2><table class="widefat striped" style="max-width:1000px"><thead><tr><th>コード</th><th>お客様への表示</th><th>管理者の対応</th></tr></thead><tbody>';
+		echo '<h2>' . esc_html( 'エラーコード一覧' ) . '</h2><table class="widefat striped" style="max-width:1000px"><thead><tr><th style="white-space:nowrap">コード</th><th>お客様への表示</th><th>管理者の対応</th></tr></thead><tbody>';
 		foreach ( ErrorCatalog::codes() as $code ) {
-			printf( '<tr><td>%s</td><td>%s</td><td>%s</td></tr>', esc_html( $code ), esc_html( ErrorCatalog::message( $code, 'customer' ) ), esc_html( ErrorCatalog::message( $code, 'admin' ) ) );
+			printf( '<tr><td style="white-space:nowrap">%s</td><td>%s</td><td>%s</td></tr>', esc_html( $code ), esc_html( ErrorCatalog::message( $code, 'customer' ) ), esc_html( ErrorCatalog::message( $code, 'admin' ) ) );
 		}
 		echo '</tbody></table></div>';
 	}

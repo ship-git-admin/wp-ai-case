@@ -16,6 +16,10 @@
 	var FORM_KEY = 'wpaic_form_v1';
 	var JOB_KEY = 'wpaic_job_v1';
 	var PHASES = { unknown: '未指定', before: '施工前', during: '施工中', after: '施工後' };
+	var KIND_LABELS = {
+		introduction: '導入', before: '施工前', during: '施工中', after: '施工後', comparison: '比較（ビフォーアフター）',
+		feature: '特徴', summary: 'まとめ', custom: 'その他'
+	};
 	var SECTION_LABELS = {
 		title: 'タイトル', concept: 'コンセプト（見出し）', summary: 'コンセプト説明', body: '本文（各セクション）',
 		client_request: 'お客様のご要望', proposal: 'ご提案（実施した工事）', facts: '施工概要の項目',
@@ -32,7 +36,7 @@
 		expired: '有効期限が切れました', failed: '処理を完了できませんでした', needs_recovery: '送信結果を確認できませんでした'
 	};
 
-	var state = { options: null, job: null, busy: false, form: loadForm() };
+	var state = { options: null, job: null, busy: false, form: loadForm(), drafts: {} };
 
 	// ---------- 小さな道具 ----------
 	function h( tag, attrs ) {
@@ -104,6 +108,10 @@
 		try { window.sessionStorage.setItem( FORM_KEY, JSON.stringify( state.form ) ); } catch ( e ) {}
 	}
 	function setJob( job ) {
+		// 「反映」していない入力は、同じジョブの提案中だけ保持する（再描画で消さない）。
+		if ( ! job || ! state.job || job.job_id !== state.job.job_id || job.status !== 'proposal_ready' ) {
+			state.drafts = {};
+		}
 		state.job = job;
 		try {
 			if ( job && [ 'committed', 'cancelled', 'expired' ].indexOf( job.status ) === -1 ) {
@@ -380,51 +388,115 @@
 			wrap.appendChild( h( 'div', { class: 'notice notice-info inline' }, h( 'p', { text: 'AIから確認したいこと（必要なら下の項目に追記してください）：' } ), h( 'ul', {}, job.questions.map( function ( q ) { return h( 'li', { text: q } ); } ) ) ) );
 		}
 
-		function textBlock( label, value, onApply, multi ) {
+		// 未反映の入力：再描画しても値を残し、黄色で示す。保存はすべて反映か破棄するまで止める。
+		var dirtyMsg = h( 'p', { class: 'wpaic-dirty-msg', role: 'status' } );
+		var saveBtn = null;
+		var discardBtn = null;
+		function dirtyCount() {
+			return Object.keys( state.drafts ).length;
+		}
+		function updateDirty() {
+			var n = dirtyCount();
+			dirtyMsg.textContent = n ? '「反映」していない変更が ' + n + ' か所あります（黄色の欄）。各欄の「反映」を押すか、変更を破棄してから保存してください。' : '';
+			if ( saveBtn ) {
+				saveBtn.disabled = state.busy || n > 0;
+			}
+			if ( discardBtn ) {
+				discardBtn.style.display = n ? '' : 'none'; // WordPress の .button は hidden 属性より強いので style で消す
+			}
+		}
+		function bindDraft( el, key, value ) {
+			var base = value || '';
+			var d = state.drafts[ key ];
+			if ( d !== undefined && d !== base ) {
+				el.value = d;
+				el.classList.add( 'is-dirty' );
+			} else {
+				delete state.drafts[ key ];
+				el.value = base;
+			}
+			el.addEventListener( 'input', function () {
+				if ( el.value === base ) {
+					delete state.drafts[ key ];
+					el.classList.remove( 'is-dirty' );
+				} else {
+					state.drafts[ key ] = el.value;
+					el.classList.add( 'is-dirty' );
+				}
+				updateDirty();
+			} );
+			return el;
+		}
+
+		function textBlock( label, value, onApply, multi, key ) {
 			var el = h( multi ? 'textarea' : 'input', multi ? { rows: 3, class: 'large-text' } : { type: 'text', class: 'large-text' } );
-			el.value = value || '';
+			bindDraft( el, key, value );
 			return h( 'div', { class: 'wpaic-field' }, h( 'label', {}, h( 'strong', { text: label } ), h( 'br' ), el ),
 				h( 'button', { type: 'button', class: 'button button-small', disabled: state.busy, on: { click: function () { onApply( el.value ); } } }, '反映' ) );
 		}
 		var intro = doc.sections.filter( function ( s ) { return s.node_id === 'intro'; } )[ 0 ] || { heading: '', body: '' };
 		wrap.appendChild( h( 'h2', { text: '基本' } ) );
-		wrap.appendChild( textBlock( 'タイトル', doc.title, function ( v ) { op( 'title', { op: 'text_set', value: v } ); } ) );
-		wrap.appendChild( textBlock( 'コンセプト（見出し）', intro.heading, function ( v ) { op( 'concept', { op: 'text_set', value: v } ); } ) );
-		wrap.appendChild( textBlock( 'コンセプト説明', doc.summary, function ( v ) { op( 'summary', { op: 'text_set', value: v } ); }, true ) );
+		wrap.appendChild( textBlock( 'タイトル', doc.title, function ( v ) { op( 'title', { op: 'text_set', value: v } ); }, false, 'title' ) );
+		wrap.appendChild( textBlock( 'コンセプト（見出し）', intro.heading, function ( v ) { op( 'concept', { op: 'text_set', value: v } ); }, false, 'concept' ) );
+		wrap.appendChild( textBlock( 'コンセプト説明', doc.summary, function ( v ) { op( 'summary', { op: 'text_set', value: v } ); }, true, 'summary' ) );
 
 		wrap.appendChild( h( 'h2', { text: '施工概要（入力された事実だけを載せます）' } ) );
 		var tbl = h( 'table', { class: 'widefat striped wpaic-facts' } );
 		Object.keys( FACT_LABELS ).forEach( function ( k ) {
 			var f = doc.facts[ k ];
-			var el = h( 'input', { type: 'text', class: 'regular-text' } );
-			el.value = f && f.value ? f.value : '';
+			var el = bindDraft( h( 'input', { type: 'text', class: 'regular-text', 'aria-label': FACT_LABELS[ k ] } ), 'fact:' + k, f && f.value ? f.value : '' );
 			tbl.appendChild( h( 'tr', {}, h( 'th', { text: FACT_LABELS[ k ] } ), h( 'td', {}, el, ' ',
 				h( 'button', { type: 'button', class: 'button button-small', disabled: state.busy, on: { click: function () { op( 'facts', { op: 'fact_set', fact_key: k, value: el.value, source: 'user_input' } ); } } }, '反映' ) ) ) );
 		} );
 		wrap.appendChild( tbl );
 
+		// 保存時と同じ決まりで写真を並べる（施工前・中・後は写真の工程で、比較は前後1枚ずつ）。
+		var incl = doc.images.filter( function ( i ) { return i.included; } ).sort( function ( a, b ) { return a.original_position - b.original_position; } );
+		function phaseIds( p ) {
+			return incl.filter( function ( i ) { return i.phase === p; } ).map( function ( i ) { return i.attachment_id; } );
+		}
+		function firstIn( ids, p ) {
+			var hit = phaseIds( p ).filter( function ( id ) { return ids.indexOf( id ) !== -1; } );
+			return hit.length ? hit[ 0 ] : null;
+		}
 		wrap.appendChild( h( 'h2', { text: '本文' } ) );
+		wrap.appendChild( h( 'p', { class: 'description', text: '施工前・施工中・施工後の写真は、下の「写真」で選んだ工程ごとに入ります。' } ) );
 		doc.sections.forEach( function ( s ) {
 			if ( s.node_id === 'intro' ) {
 				return;
 			}
-			var hd = h( 'input', { type: 'text', class: 'large-text' } );
-			hd.value = s.heading;
-			var bd = h( 'textarea', { rows: 3, class: 'large-text' } );
-			bd.value = s.body;
-			var thumbs = h( 'div', { class: 'wpaic-thumbs' }, ( s.image_ids || [] ).map( function ( id ) { return job.images[ id ] ? h( 'img', { src: job.images[ id ].thumb, alt: '', width: 64, height: 64 } ) : null; } ) );
-			wrap.appendChild( h( 'div', { class: 'wpaic-section' }, h( 'span', { class: 'wpaic-kind', text: s.kind } ), hd, bd, thumbs,
+			var shown = [];
+			var note = null;
+			if ( [ 'before', 'during', 'after' ].indexOf( s.kind ) !== -1 ) {
+				shown = phaseIds( s.kind );
+			} else if ( s.kind === 'comparison' ) {
+				var pb = firstIn( s.image_ids || [], 'before' );
+				var pa = firstIn( s.image_ids || [], 'after' );
+				if ( pb && pa ) {
+					shown = [ pb, pa ];
+				} else {
+					note = h( 'p', { class: 'description', text: '施工前と施工後の写真がそろわないため、この比較は保存されません。' } );
+				}
+			}
+			var kind = KIND_LABELS[ s.kind ] || s.kind;
+			var hd = bindDraft( h( 'input', { type: 'text', class: 'large-text', 'aria-label': kind + '：見出し' } ), 'sec:' + s.node_id + ':h', s.heading );
+			var bd = bindDraft( h( 'textarea', { rows: 3, class: 'large-text', 'aria-label': kind + '：本文' } ), 'sec:' + s.node_id + ':b', s.body );
+			var thumbs = h( 'div', { class: 'wpaic-thumbs' }, shown.map( function ( id ) { return job.images[ id ] ? h( 'img', { src: job.images[ id ].thumb, alt: '', width: 64, height: 64 } ) : null; } ) );
+			wrap.appendChild( h( 'div', { class: 'wpaic-section' }, h( 'span', { class: 'wpaic-kind', text: kind } ), hd, bd, thumbs, note,
 				h( 'button', { type: 'button', class: 'button button-small', disabled: state.busy, on: { click: function () { op( 'body', { op: 'body_section_set', node_id: s.node_id, heading: hd.value, body: bd.value } ); } } }, '反映' ) ) );
 		} );
 
 		wrap.appendChild( h( 'h2', { text: '写真' } ) );
+		var unknownCount = phaseIds( 'unknown' ).length;
+		if ( unknownCount ) {
+			wrap.appendChild( h( 'p', { class: 'description', text: '工程が「不明」の写真（' + unknownCount + '枚）は、「特徴」の欄にまとめて入ります。' } ) );
+		}
 		var order = doc.images.map( function ( i ) { return i.attachment_id; } );
 		var grid = h( 'div', { class: 'wpaic-grid' } );
 		doc.images.forEach( function ( img, i ) {
 			var phase = h( 'select', { disabled: state.busy, on: { change: function ( e ) { op( 'before_after', { op: 'image_phase_set', attachment_id: img.attachment_id, phase: e.target.value } ); } } } );
 			Object.keys( PHASES ).forEach( function ( k ) { phase.appendChild( h( 'option', { value: k, selected: img.phase === k, text: k === 'unknown' ? '不明' : PHASES[ k ] } ) ); } );
-			var cap = h( 'input', { type: 'text', placeholder: 'キャプション' } );
-			cap.value = img.caption || '';
+			var cap = bindDraft( h( 'input', { type: 'text', placeholder: 'キャプション', 'aria-label': '写真' + ( i + 1 ) + 'のキャプション' } ), 'cap:' + img.attachment_id, img.caption );
 			grid.appendChild( h( 'div', { class: 'wpaic-card' + ( img.included ? '' : ' is-excluded' ) },
 				job.images[ img.attachment_id ] ? h( 'img', { src: job.images[ img.attachment_id ].medium || job.images[ img.attachment_id ].thumb, alt: '' } ) : null,
 				h( 'p', { class: 'description', text: img.description + ( img.uncertain ? '（工程は推定）' : '' ) } ),
@@ -443,7 +515,7 @@
 
 		wrap.appendChild( h( 'h2', { text: 'SEO' } ) );
 		[ [ 'title', 'タイトル' ], [ 'description', '説明文' ], [ 'h1', 'H1' ], [ 'keywords', 'キーワード' ] ].forEach( function ( x ) {
-			wrap.appendChild( textBlock( 'SEO：' + x[ 1 ], ( doc.seo || {} )[ x[ 0 ] ], function ( v ) { op( 'seo', { op: 'seo_set', field: x[ 0 ], value: v } ); } ) );
+			wrap.appendChild( textBlock( 'SEO：' + x[ 1 ], ( doc.seo || {} )[ x[ 0 ] ], function ( v ) { op( 'seo', { op: 'seo_set', field: x[ 0 ], value: v } ); }, false, 'seo:' + x[ 0 ] ) );
 		} );
 
 		// AIによる修正（選んだ部分だけ）
@@ -452,26 +524,35 @@
 		var all = h( 'input', { type: 'checkbox', on: { change: function ( e ) { Array.prototype.forEach.call( checks.querySelectorAll( 'input[data-sec]' ), function ( c ) { c.checked = e.target.checked; } ); } } } );
 		checks.appendChild( h( 'label', {}, all, ' すべて' ) );
 		aiSections.forEach( function ( s ) { checks.appendChild( h( 'label', {}, h( 'input', { type: 'checkbox', 'data-sec': s } ), ' ' + SECTION_LABELS[ s ] ) ); } );
-		var instr = h( 'textarea', { rows: 3, class: 'large-text', placeholder: '例：タイトルをもう少し短く、本文はやわらかい言い方にしてください' } );
-		wrap.appendChild( h( 'div', { class: 'wpaic-ai' }, h( 'h2', { text: 'AIで修正する（選んだ部分だけ）' } ), checks, instr,
+		var instr = h( 'textarea', { rows: 3, class: 'large-text', placeholder: '例：タイトルをもう少し短く、本文はやわらかい言い方にしてください', 'aria-label': '修正の指示' } );
+		var aiMsg = h( 'p', { class: 'wpaic-danger', role: 'alert' } );
+		wrap.appendChild( h( 'div', { class: 'wpaic-ai' }, h( 'h2', { text: 'AIで修正する（選んだ部分だけ）' } ), checks, instr, aiMsg,
 			h( 'p', {}, h( 'button', { type: 'button', class: 'button', disabled: state.busy, on: { click: function () {
 				var secs = Array.prototype.filter.call( checks.querySelectorAll( 'input[data-sec]' ), function ( c ) { return c.checked; } ).map( function ( c ) { return c.getAttribute( 'data-sec' ); } );
 				if ( ! secs.length || ! instr.value.trim() ) {
-					window.alert( '修正する部分と、修正の指示を入力してください。' );
+					aiMsg.textContent = ! secs.length ? '修正する部分を1つ以上選んでください。' : '修正の指示を入力してください。';
 					return;
 				}
+				aiMsg.textContent = '';
 				revise( { allowed_sections: secs, instruction: instr.value } );
 			} } }, state.busy ? '処理中…' : 'AIで修正' ) ) ) );
 
-		wrap.appendChild( h( 'p', { class: 'wpaic-actions' },
-			h( 'button', { type: 'button', class: 'button button-primary button-hero', disabled: state.busy, on: { click: function () {
-				busy( function () { return api( 'jobs/' + job.job_id + '/save', 'POST', { base_index: job.version_index } ).then( function ( j ) {
-					try { window.sessionStorage.removeItem( FORM_KEY ); } catch ( e ) {}
-					state.form = loadForm();
-					setJob( j );
-				} ); } );
-			} } }, state.busy ? '処理中…' : '下書きとして保存' ), ' ',
+		saveBtn = h( 'button', { type: 'button', class: 'button button-primary button-hero', on: { click: function () {
+			if ( dirtyCount() ) {
+				updateDirty();
+				return;
+			}
+			busy( function () { return api( 'jobs/' + job.job_id + '/save', 'POST', { base_index: job.version_index } ).then( function ( j ) {
+				try { window.sessionStorage.removeItem( FORM_KEY ); } catch ( e ) {}
+				state.form = loadForm();
+				setJob( j );
+			} ); } );
+		} } }, state.busy ? '処理中…' : '下書きとして保存' );
+		discardBtn = h( 'button', { type: 'button', class: 'button', on: { click: function () { state.drafts = {}; render(); } } }, '未反映の変更を破棄' );
+		wrap.appendChild( dirtyMsg );
+		wrap.appendChild( h( 'p', { class: 'wpaic-actions' }, saveBtn, ' ', discardBtn, ' ',
 			h( 'button', { type: 'button', class: 'button', disabled: state.busy, on: { click: cancelJob } }, '取り消す' ) ) );
+		updateDirty();
 		return wrap;
 	}
 

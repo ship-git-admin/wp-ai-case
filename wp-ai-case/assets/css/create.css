@@ -24,4 +24,17 @@
 .wpaic-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
 .wpaic-ai { background: #fff; border: 1px solid #dcdcde; padding: 4px 16px 8px; margin-top: 16px; }
 .wpaic-spin { float: none; margin: 0 4px 0 0; }
-@media (max-width: 782px) { .wpaic-toolbar { top: 46px; } .wpaic-photos li { flex-wrap: wrap; } }
+.wpaic .is-dirty { background: #fcf9e8; border-color: #dba617; box-shadow: 0 0 0 1px #dba617; }
+.wpaic-dirty-msg { color: #8a6100; font-weight: 600; margin: 16px 0 0; }
+.wpaic-dirty-msg:empty { display: none; }
+@media (max-width: 782px) {
+	.wpaic-toolbar { top: 46px; }
+	.wpaic-photos li { flex-wrap: wrap; }
+	/* 施工概要の表：スマホでは見出しと入力欄を縦に並べる */
+	.wpaic-facts, .wpaic-facts tbody, .wpaic-facts tr, .wpaic-facts th, .wpaic-facts td { display: block; width: auto; }
+	.wpaic-facts th { padding-bottom: 0; }
+	.wpaic-facts input.regular-text { width: 100%; max-width: none; margin-bottom: 4px; }
+	.wpaic-card .button-link { padding: 6px 4px; }
+}
+/* 600px 以下では管理バーが固定されないので、上端に付ける */
+@media (max-width: 600px) { .wpaic-toolbar { top: 0; } }

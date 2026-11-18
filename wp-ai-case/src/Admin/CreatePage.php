@@ -28,8 +28,12 @@ final class CreatePage {
 		}
 		wp_enqueue_media();
 		$ver = defined( 'WP_AI_CASE_VERSION' ) ? WP_AI_CASE_VERSION : '0';
-		wp_enqueue_style( 'wp-ai-case-create', plugins_url( 'assets/css/create.css', WP_AI_CASE_FILE ), array(), $ver );
-		wp_enqueue_script( 'wp-ai-case-create', plugins_url( 'assets/js/create.js', WP_AI_CASE_FILE ), array(), $ver, true );
+		$dir = plugin_dir_path( WP_AI_CASE_FILE );
+		// 更新後に古いファイルがブラウザに残らないよう、版に更新日時を足す。
+		$css_ver = $ver . '.' . (int) @filemtime( $dir . 'assets/css/create.css' );
+		$js_ver  = $ver . '.' . (int) @filemtime( $dir . 'assets/js/create.js' );
+		wp_enqueue_style( 'wp-ai-case-create', plugins_url( 'assets/css/create.css', WP_AI_CASE_FILE ), array(), $css_ver );
+		wp_enqueue_script( 'wp-ai-case-create', plugins_url( 'assets/js/create.js', WP_AI_CASE_FILE ), array(), $js_ver, true );
 		wp_add_inline_script(
 			'wp-ai-case-create',
 			'window.WPAIC = ' . wp_json_encode(
