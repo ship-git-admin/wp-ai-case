@@ -258,6 +258,29 @@ final class MappingService {
 	}
 
 	/**
+	 * 承認済みの版で、テーマが変わった後に実表示を確認し直したことを記録する（状態は承認済みのまま）。
+	 * ACF の定義が同じでも表示テンプレートは別に変わりうるので、表示の確認状態だけを更新する。
+	 *
+	 * @param array<string,mixed> $row
+	 * @param array{post_type:string,post_id:int,post_terms:array<string,int[]>} $context
+	 */
+	public function reconfirm_display( array $row, array $context, int $actor, string $evidence ): array {
+		$this->require_admin( $actor );
+		if ( 'approved_active' !== $row['status'] ) {
+			throw new CaseError( CaseError::INVALID_TRANSITION, '表示の再確認は、承認済みの版だけで行えます' );
+		}
+		$cur                                           = $this->require_same_definition( $row, $context );
+		$doc                                           = $row['document'];
+		$doc['validation']['staging_display_passed']   = true;
+		$doc['validation']['tested_theme_fingerprint'] = SchemaInspector::theme_fingerprint();
+		$doc['validation']['verified_at']              = gmdate( 'Y-m-d\TH:i:s\Z' );
+		$doc['validation']['evidence_ref']             = trim( (string) $doc['validation']['evidence_ref'] . ' ; display_recheck: ' . $evidence, ' ;' );
+		$updated = $this->repo->compare_and_set( $row, 'approved_active', $doc );
+		$this->event( $updated, 'approved_active', 'approved_active', 'staging_validation_passed', 'テーマ変更後に実表示を再確認', $actor, (string) $row['schema_sha256'], $cur['schema_sha256'], $cur['context_hash'], array( $evidence ), array() );
+		return $updated;
+	}
+
+	/**
 	 * 管理者の承認。承認後はこの版で生成・保存を再開する。同じ文脈の古い版は退役させる。
 	 *
 	 * @param array<string,mixed> $row

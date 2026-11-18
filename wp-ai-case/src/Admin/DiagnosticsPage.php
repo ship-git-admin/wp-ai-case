@@ -48,7 +48,7 @@ final class DiagnosticsPage {
 		'verify_model'            => '接続テストで、モデル（Claude Haiku 5.5）を利用できるか確認',
 		'check_quota'             => '新規作成枠の管理は次の段階（C1-D）で実装予定',
 		'check_budget'            => '費用上限の管理は次の段階（C1-D）で実装予定',
-		'repair_acf_mapping'      => 'wp ai-case mapping status / propose で確認・再設定し、検証・承認',
+		'repair_acf_mapping'      => '「AI施工事例 > マッピング」で状態を確認し、提案・検証・承認',
 		'inspect_background_jobs' => 'WP-Cron が予定どおり動いていません。Basic認証・WAF・サーバーのCron設定を確認',
 		'inspect_rest_basic_waf'  => 'REST の制限（Code Snippet の例外）・Basic認証・WAF・HTTPS の設定を確認',
 		'review_provider_status'  => 'Anthropic の稼働状況を確認',

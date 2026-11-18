@@ -67,7 +67,8 @@ final class CreatePage {
 				esc_html( (string) $pre['error']['error_code'] )
 			);
 			if ( current_user_can( 'manage_options' ) ) {
-				printf( '<p><a class="button" href="%s">%s</a></p>', esc_url( Menu::diagnostics_url() ), esc_html( '接続・診断を開く（管理者）' ) );
+				$mapping = 'AI-010' === (string) $pre['error']['error_code'];
+				printf( '<p><a class="button" href="%s">%s</a></p>', esc_url( $mapping ? Menu::mapping_url() : Menu::diagnostics_url() ), esc_html( $mapping ? 'マッピングを開く（管理者）' : '接続・診断を開く（管理者）' ) );
 			}
 		}
 		echo '<div id="wpaic-app" data-available="' . ( $pre['ok'] ? '1' : '0' ) . '"><p>' . esc_html( '読み込み中…' ) . '</p></div>';

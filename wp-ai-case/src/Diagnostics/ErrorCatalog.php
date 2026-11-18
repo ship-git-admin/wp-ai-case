@@ -26,7 +26,7 @@ final class ErrorCatalog {
 		'AI-007' => array( 'AI機能との通信を確認中です。しばらくしてから再試行してください。', 'サーバーから Claude API への通信に失敗しました（DNS・TLS・タイムアウト等）。サーバーの外向きHTTPS通信を確認してください。', true, 'retry_later', 'open_admin_diagnostics', '安全性確認後' ),
 		'AI-008' => array( '指定した画像を確認してください（形式・サイズ）。', '画像の形式・サイズ・入力容量の上限を超えました。対象の画像を確認してください（元画像は変更されません）。', false, 'review_image', 'review_image', '修正後のみ' ),
 		'AI-009' => array( '生成結果を確認中です。しばらくお待ちください。', 'AIの結果が期待した形式と一致しない、または写真の一部が欠けていたため、保存せずに止めました。', true, 'refresh_status', 'refresh_status', '条件付' ),
-		'AI-010' => array( 'サイト構成の再確認待ちです。サイト管理者へお問い合わせください。', 'ACFの構造とマッピングが一致しません。マッピングの再提案・検証・承認（wp ai-case mapping）を行ってください。', false, 'contact_admin', 'review_mapping', 'しない' ),
+		'AI-010' => array( 'サイト構成の再確認待ちです。サイト管理者へお問い合わせください。', 'ACFの構造とマッピングが一致しません。「AI施工事例 > マッピング」で、提案・検証用の下書きでの保存確認・表示確認・承認を行ってください（WP-CLI の wp ai-case mapping でも可）。', false, 'contact_admin', 'review_mapping', 'しない' ),
 		'AI-011' => array( '処理に遅れが生じています。しばらくしてから状況を確認してください。', 'バックグラウンド処理（WP-Cron 等）が動いていない可能性があります。Cron・Basic認証・WAF を確認し、ジョブを再開してください。', true, 'refresh_status', 'resume_job', '条件付' ),
 		'AI-012' => array( '更新内容に差異があります。最新の状態を確認してください。', '投稿の状態変更・他の人の更新・取消しのため、保存しませんでした。差分と基準版を確認してください。', false, 'review_draft', 'review_draft', '自動保存禁止' ),
 		'AI-013' => array( '当月の新規作成枠を使い切りました。', '今月の新規AI作成枠（5件）を使い切りました。使用数・予約・翌月の開始日を確認してください。', false, 'review_quota', 'review_quota', 'しない' ),

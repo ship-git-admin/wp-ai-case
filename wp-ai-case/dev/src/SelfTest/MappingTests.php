@@ -15,7 +15,10 @@ use WpAiCase\Dev\AcfVariants;
 use WpAiCase\Mapping\BindingResolver;
 use WpAiCase\Mapping\MappingService;
 use WpAiCase\Mapping\MappingTranslator;
+use WpAiCase\Admin\MappingPage;
+use WpAiCase\Draft\DraftWriter;
 use WpAiCase\Mapping\SampleDocument;
+use WpAiCase\Mapping\StagingValidator;
 use WpAiCase\Mapping\ShipWorksTemplateV11;
 use WpAiCase\Plugin;
 use WpAiCase\Support\CaseError;
@@ -52,6 +55,103 @@ final class MappingTests {
 		}
 		$this->unit();
 		$this->lifecycle();
+		$this->staging();
+	}
+
+	/**
+	 * 管理画面のステージング検証（配布版の道具）。実サイトの承認済みの版を使い、状態は変えない。
+	 */
+	private function staging(): void {
+		$t         = $this->t;
+		$inspector = new SchemaInspector();
+		$context   = $inspector->context( Plugin::POST_TYPE, 0, array() );
+		$service   = new MappingService();
+		$validator = new StagingValidator( $service );
+		try {
+			$row = $service->gate( $context );
+		} catch ( CaseError $e ) {
+			$t->test( 'MS-00', '前提：承認済みのマッピング', fn() => throw new SkipTest( '新規作成の条件に承認済みのマッピングがありません' ) );
+			return;
+		}
+		$had_images = (bool) get_option( StagingValidator::IMAGES_OPTION );
+
+		$t->test( 'MS-01', '検証用の下書き（トップの写真 3パターン）を保存・読み戻し。下書きのまま・印付き・外部0。承認済みの版の状態は変えない', function () use ( $validator, $service, $row, $context ) {
+			$r = $validator->run( $row, $context, $this->admin );
+			$this->t->same( StagingValidator::HEROES, array_keys( $r['drafts'] ), '3パターン' );
+			foreach ( $r['drafts'] as $hero => $id ) {
+				$p = get_post( $id );
+				$this->t->same( array( 'works', 'draft' ), array( $p->post_type, $p->post_status ), "{$hero}: 下書き" );
+				$this->t->same( array( '1', $row['mapping_id'] . ':' . $row['mapping_version'] ), array( (string) get_post_meta( $id, DraftWriter::POC_MARK, true ), (string) get_post_meta( $id, StagingValidator::MARK, true ) ), "{$hero}: 印" );
+				$this->t->same( 'ok', get_post_meta( $id, DraftWriter::AUDIT_META, true )['readback'] ?? null, "{$hero}: 読み戻し" );
+			}
+			$fv = array();
+			foreach ( $r['drafts'] as $hero => $id ) {
+				$fv[ $hero ] = get_field( 'FV_Layout', $id, false );
+			}
+			$this->t->same( array( 'before_after' => 'layout03', 'gallery' => 'layout02', 'single' => 'layout01' ), $fv, 'トップの写真の型' );
+			$this->t->same( 'approved_active', $service->repository()->get( $row['mapping_id'], (int) $row['mapping_version'] )['status'], '版の状態は変わらない' );
+			$this->t->same( $r['drafts'], $validator->drafts( (string) $row['mapping_id'], (int) $row['mapping_version'] ), '一覧' );
+			$images = get_option( StagingValidator::IMAGES_OPTION );
+			$this->t->same( 6, count( (array) $images ), '検証用の画像' );
+			foreach ( (array) $images as $id ) {
+				$this->t->same( '1', (string) get_post_meta( $id, StagingValidator::IMAGE_MARK, true ), '画像の印' );
+			}
+		} );
+
+		$t->test( 'MS-02', '構造検証前の版・管理者以外は検証できない', function () use ( $validator, $row, $context ) {
+			$this->t->throws_case( CaseError::FORBIDDEN, fn() => $validator->run( $row, $context, 0 ) );
+			$fake           = $row;
+			$fake['status'] = 'proposed';
+			$this->t->throws_case( CaseError::INVALID_TRANSITION, fn() => $validator->run( $fake, $context, $this->admin ) );
+		} );
+
+		$t->test( 'MS-03', '表示の再確認（承認済みのまま、テーマの指紋と証跡を更新）', function () use ( $service, $row, $context ) {
+			$before = $service->inspect( $context, 0, true )['display'];
+			$fake   = static fn( $h ) => $h . '-selftest';
+			add_filter( 'wp_ai_case_theme_fingerprint', $fake );
+			try {
+				$this->t->same( 'recheck_required', $service->inspect( $context, 0, true )['display'], '再確認が必要' );
+				$new = $service->reconfirm_display( $service->gate( $context ), $context, $this->admin, 'selftest' );
+				$this->t->same( array( 'approved_active', 'verified' ), array( $new['status'], $service->inspect( $context, 0, true )['display'] ), '再確認後' );
+			} finally {
+				remove_filter( 'wp_ai_case_theme_fingerprint', $fake );
+				// 元のテーマの指紋に戻す（試験の記録を残さないよう、文書を元に戻す）。
+				$cur = $service->gate( $context );
+				$service->repository()->compare_and_set( $cur, 'approved_active', $row['document'] );
+				// 試験で足したイベント（実サイトの版の履歴）を消す。
+				global $wpdb;
+				$table = \WpAiCase\Support\Installer::events_table();
+				foreach ( $service->repository()->events( (string) $row['mapping_id'] ) as $e ) {
+					if ( array( 'selftest' ) === ( $e['evidence_refs'] ?? null ) && 'テーマ変更後に実表示を再確認' === $e['reason'] ) {
+						$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE mapping_id = %s AND document LIKE %s", $row['mapping_id'], '%' . $wpdb->esc_like( '"event_id":"' . $e['event_id'] . '"' ) . '%' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					}
+				}
+			}
+			$this->t->same( $before, $service->inspect( $context, 0, true )['display'], '元に戻した' );
+			$left = array_filter( $service->repository()->events( (string) $row['mapping_id'] ), static fn( $e ) => array( 'selftest' ) === ( $e['evidence_refs'] ?? null ) && 'テーマ変更後に実表示を再確認' === $e['reason'] );
+			$this->t->same( array(), array_values( $left ), '試験のイベントを消した' );
+		} );
+
+		$t->test( 'MS-04', '画面の条件の表し方（新規・ターム・投稿）', function () use ( $inspector, $context ) {
+			$this->t->same( $context, MappingPage::decode( MappingPage::encode( $context ) ), '新規（タームなし）' );
+			$post = (int) ( get_posts( array( 'post_type' => 'works', 'posts_per_page' => 1, 'fields' => 'ids', 'post_status' => 'any' ) )[0] ?? 0 );
+			if ( $post ) {
+				$this->t->same( $inspector->context( Plugin::POST_TYPE, $post ), MappingPage::decode( 'post:' . $post ), '投稿' );
+			}
+			$this->t->throws_case( CaseError::INVALID_TRANSITION, fn() => MappingPage::decode( 't:no_such_tax=1' ) );
+		} );
+
+		$n = $validator->cleanup( $row['mapping_id'] . ':' . $row['mapping_version'] );
+		if ( ! $had_images ) {
+			$validator->cleanup();
+		}
+		$t->test( 'MS-99', '検証用の下書き（と画像）を削除した', function () use ( $validator, $row, $n, $had_images ) {
+			$this->t->same( 3, $n, '削除した下書き' );
+			$this->t->same( array(), $validator->drafts( (string) $row['mapping_id'], (int) $row['mapping_version'] ), '残っている下書き' );
+			if ( ! $had_images ) {
+				$this->t->same( false, get_option( StagingValidator::IMAGES_OPTION ), '画像の記録' );
+			}
+		} );
 	}
 
 	/**
