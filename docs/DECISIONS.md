@@ -61,3 +61,21 @@
 
 ## D-013 契約 v0.6.2（acf_mapping）
 - bindings に `layout_key`（レイアウトの結び付け用）、validation に `tested_theme_fingerprint`、未対応時の `problems` を追加。
+
+## D-014 接続診断（C1-C 前半）
+- 生成前のローカル確認（`PreflightService`）は外部通信0・ジョブ0・投稿0。順番：権限 → APIキー（AI-001）→ モデル（AI-004）→ 直前の接続テストで分かった認証・権限・モデルの失敗（AI-002/003/004）→ ACFマッピング（AI-010）。
+- 管理者のローカル診断（`DiagnosticsService`、契約 `diagnostic_result`）は外部通信をしない。「キー設定済み」を「接続成功」と表示しない。
+- 接続テスト（`ProviderProbe`）は管理者の明示操作だけ。費用の可能性への同意、nonce、300秒の間隔、1日10回まで。ユーザーのデータは送らない。結果は分類コードと日時だけを保存し、24時間かモデル変更で「未確認」に戻す。
+- エラーは AI-001〜018 の固定文（`ErrorCatalog`）だけで表示し、詳細はサポートID（uuid v4）で管理者だけが参照する。記録する補足情報は許可したキーだけで、秘密・URL・パス・IP・PHP版を消す（`Redactor`）。
+- APIキーは `wp-config.php` の定数 `WP_AI_ANTHROPIC_API_KEY` だけから読む。管理画面での入力・保存・表示はしない。
+
+## D-015 顧客向けの通信は admin-ajax（REST に頼らない）
+- 共通テンプレートのサイトには、管理者以外の REST API を止める Code Snippet（oEmbed・Contact Form 7 以外は `rest_disabled`）が入っている。
+- そのため顧客向けの操作は `admin-ajax.php`（ログインCookie＋nonce＋施工事例の編集権限、未ログイン用は登録しない）で行う。REST は管理者専用の診断・サポート記録だけ。
+- ローカル診断で「管理者以外の REST が止められているか」を確認して表示する。
+
+## D-016 接続テストの送信内容
+- 認証とモデルの到達性だけを確かめる最小の呼び出しにする（Models API でモデルを1件取得する想定）。トークンは消費しない見込みだが、レート消費の可能性があるため費用の注意と同意は残す。
+
+## D-017 Claude API の呼び出し方法（確認中）
+- 公式の PHP SDK は Composer で入れる形式。WordPress プラグインとして多数のサイトへ配布する場合の扱い（SDK を名前空間を変えて同梱するか、WordPress の HTTP API で直接呼ぶか）を依頼者に確認中。それまでは `PendingProvider`（外部通信なし）を使う。

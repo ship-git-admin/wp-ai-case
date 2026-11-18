@@ -19,3 +19,4 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
 PreviewToken::register();
 AcfVariants::register();
+MockProvider::register();

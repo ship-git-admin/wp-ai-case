@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class Installer {
 
-	public const DB_VERSION        = '1';
+	public const DB_VERSION        = '2';
 	private const DB_VERSION_OPTION = 'wp_ai_case_db_version';
 	private const SITE_SCOPE_OPTION = 'wp_ai_case_site_scope_id';
 
@@ -23,6 +23,11 @@ final class Installer {
 	public static function events_table(): string {
 		global $wpdb;
 		return $wpdb->prefix . 'wpaic_mapping_events';
+	}
+
+	public static function support_log_table(): string {
+		global $wpdb;
+		return $wpdb->prefix . 'wpaic_support_log';
 	}
 
 	/**
@@ -76,6 +81,21 @@ final class Installer {
   occurred_at datetime NOT NULL,
   PRIMARY KEY  (id),
   KEY mapping (mapping_id,mapping_version)
+) {$charset};"
+		);
+		$support = self::support_log_table();
+		dbDelta(
+			"CREATE TABLE {$support} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  support_id char(36) NOT NULL,
+  code varchar(8) NOT NULL,
+  event varchar(64) NOT NULL,
+  user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+  details longtext NOT NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY support_id (support_id),
+  KEY created_at (created_at)
 ) {$charset};"
 		);
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, false );

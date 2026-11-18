@@ -23,6 +23,11 @@ final class Plugin {
 		}
 
 		Support\Installer::maybe_install();
+		Rest\RestController::register();
+		Rest\AjaxController::register();
+		if ( is_admin() ) {
+			Admin\Menu::register();
+		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'ai-case', Cli\Commands::class );
