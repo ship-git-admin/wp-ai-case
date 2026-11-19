@@ -151,6 +151,12 @@ final class ArticleTests {
 			$r = PatchApplier::apply( $doc, array( 'photos' ), array( array( 'op' => 'image_caption_set', 'section' => 'photos', 'attachment_id' => 1, 'caption' => '施工前' ) ), false );
 			$this->t->same( '施工前', $r['doc']['images'][0]['caption'], '利用者の入力はそのまま' );
 		} );
+
+		$this->t->test( 'A-13', '記事の文章：写真についての注意・確認のメモの文だけを除く（ふつうの文は残す）', function () {
+			$in  = '外壁と雨樋を塗装しました。仕上がりの色は、掲載用写真での確認が必要です。点検で劣化を確認し、補修しました。画像からは色合いを判断できません。';
+			$this->t->same( '外壁と雨樋を塗装しました。点検で劣化を確認し、補修しました。', ResultAssembler::prose( $in, 800 ), '除く文' );
+			$this->t->same( '下地を補修しました。', ResultAssembler::prose( '下地を補修しました。', 800 ), 'ふつうの文' );
+		} );
 	}
 
 	private function assemble(): void {

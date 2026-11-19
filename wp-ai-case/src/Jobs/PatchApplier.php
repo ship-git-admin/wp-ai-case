@@ -111,7 +111,7 @@ final class PatchApplier {
 					}
 					$phase_kind                       = in_array( $doc['sections'][ $n ]['kind'], array( 'before', 'during', 'after' ), true );
 					$doc['sections'][ $n ]['heading'] = $from_ai && $phase_kind ? ResultAssembler::heading( (string) ( $op['heading'] ?? '' ) ) : ResultAssembler::line( (string) ( $op['heading'] ?? '' ), 120 );
-					$doc['sections'][ $n ]['body']    = ResultAssembler::text( (string) ( $op['body'] ?? '' ), 1500 );
+					$doc['sections'][ $n ]['body']    = $from_ai ? ResultAssembler::prose( (string) ( $op['body'] ?? '' ), 1500 ) : ResultAssembler::text( (string) ( $op['body'] ?? '' ), 1500 );
 					$changed[]                        = 'body:' . $doc['sections'][ $n ]['node_id'];
 					break;
 

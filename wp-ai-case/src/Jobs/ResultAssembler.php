@@ -86,13 +86,13 @@ final class ResultAssembler {
 				'node_id'            => 'intro',
 				'kind'               => 'introduction',
 				'heading'            => self::line( (string) ( $article['catch'] ?? '' ), 120 ),
-				'body'               => self::text( (string) ( $article['summary'] ?? '' ), 800 ),
+				'body'               => self::prose( (string) ( $article['summary'] ?? '' ), 800 ),
 				'image_ids'          => array(),
 				'evidence_image_ids' => array(),
 			),
 		);
 		foreach ( array( 'request' => 'request_text', 'proposal' => 'proposal_text' ) as $node => $key ) {
-			$body = self::text( (string) ( $article[ $key ] ?? '' ), 2000 );
+			$body = self::prose( (string) ( $article[ $key ] ?? '' ), 2000 );
 			if ( '' !== $body ) {
 				$sections[] = array(
 					'node_id'            => $node,
@@ -116,7 +116,7 @@ final class ResultAssembler {
 				'node_id'            => 's' . ( $n + 1 ),
 				'kind'               => $s['kind'],
 				'heading'            => in_array( $s['kind'], array( 'before', 'during', 'after' ), true ) ? self::heading( (string) ( $s['heading'] ?? '' ) ) : self::line( (string) ( $s['heading'] ?? '' ), 120 ),
-				'body'               => self::text( (string) ( $s['body'] ?? '' ), 1500 ),
+				'body'               => self::prose( (string) ( $s['body'] ?? '' ), 1500 ),
 				'image_ids'          => $sids,
 				'evidence_image_ids' => $sids,
 			);
@@ -134,7 +134,7 @@ final class ResultAssembler {
 		$drafted   = array();
 		foreach ( (array) ( $article['staff_comments'] ?? array() ) as $c ) {
 			if ( is_array( $c ) ) {
-				$drafted[ (int) ( $c['staff_no'] ?? 0 ) ] = self::text( (string) ( $c['comment'] ?? '' ), 600 );
+				$drafted[ (int) ( $c['staff_no'] ?? 0 ) ] = self::prose( (string) ( $c['comment'] ?? '' ), 600 );
 			}
 		}
 		// AI には投稿 ID を渡さず、担当スタッフの並び順（1から）で受け渡す。
@@ -150,7 +150,7 @@ final class ResultAssembler {
 			'source_request_id' => $job_id,
 			'post_type'         => 'works',
 			'title'             => '' !== $title ? $title : self::line( (string) $input['primary_facts']['overview'], 120 ),
-			'summary'           => self::text( (string) ( $article['summary'] ?? '' ), 800 ),
+			'summary'           => self::prose( (string) ( $article['summary'] ?? '' ), 800 ),
 			'facts'             => $facts,
 			'images'            => $images,
 			'sections'          => $sections,
@@ -219,6 +219,21 @@ final class ResultAssembler {
 			}
 		}
 		return (string) preg_replace( '/^[\s　・：:／\/|｜\-]+|[\s　・：:／\/|｜\-]+$/u', '', $v ); // trim() は文字単位でないので使わない
+	}
+
+	/**
+	 * AI の記事の文章：写真についての注意・確認のメモ（公開用の文章ではないもの）の文を除く。
+	 */
+	public static function prose( string $v, int $max ): string {
+		$v    = self::text( $v, $max + 200 );
+		$memo = '/(?:写真|画像)[^。\n]{0,24}(?:確認|判断|読み取|分かりません|わかりません|分からない|わからない|見え(?:ません|ない))|掲載用(?:の)?写真|(?:要|ご)確認ください|確認が必要です/u';
+		$out  = array();
+		foreach ( preg_split( '/(?<=。)/u', $v ) ?: array() as $sentence ) {
+			if ( '' !== trim( $sentence ) && ! preg_match( $memo, $sentence ) ) {
+				$out[] = $sentence;
+			}
+		}
+		return mb_substr( trim( implode( '', $out ) ), 0, $max );
 	}
 
 	public static function line( string $v, int $max ): string {
