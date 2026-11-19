@@ -322,7 +322,7 @@
 		f.photos.forEach( function ( p, i ) {
 			var phase = h( 'select', { on: { change: function ( e ) { p.hint = e.target.value; saveForm(); } } } );
 			Object.keys( PHASES ).forEach( function ( k ) { phase.appendChild( h( 'option', { value: k, selected: p.hint === k, text: PHASES[ k ] } ) ); } );
-			var cap = h( 'input', { type: 'text', placeholder: 'メモ（任意）', on: { input: function ( e ) { p.caption = e.target.value; saveForm(); } } } );
+			var cap = h( 'input', { type: 'text', placeholder: 'メモ（任意・ページには出ません）', on: { input: function ( e ) { p.caption = e.target.value; saveForm(); } } } );
 			cap.value = p.caption || '';
 			list.appendChild( h( 'li', {},
 				h( 'img', { src: p.thumb, alt: '', width: 80, height: 80 } ), phase, cap,
@@ -339,7 +339,7 @@
 		f.staff.forEach( function ( s, i ) {
 			var sel = h( 'select', { on: { change: function ( e ) { s.id = e.target.value; saveForm(); } } }, h( 'option', { value: '', text: '（紐付けなし）' } ) );
 			opts.staff.forEach( function ( v ) { sel.appendChild( h( 'option', { value: v.id, selected: String( s.id ) === String( v.id ), text: v.title } ) ); } );
-			var cm = h( 'input', { type: 'text', class: 'regular-text', placeholder: '担当者のコメント（空欄ならAIが下書きします）', on: { input: function ( e ) { s.comment = e.target.value; saveForm(); } } } );
+			var cm = h( 'textarea', { rows: 4, class: 'large-text', placeholder: '担当者のコメント（空欄ならAIが下書きします）', on: { input: function ( e ) { s.comment = e.target.value; saveForm(); } } } );
 			cm.value = s.comment || '';
 			wrap.appendChild( h( 'p', {}, h( 'label', {}, '担当スタッフ ' + ( i + 1 ), h( 'br' ), sel, ' ', cm ) ) );
 		} );
@@ -352,7 +352,7 @@
 
 		if ( ( opts.categories || [] ).length ) {
 			wrap.appendChild( h( 'h2', { text: '4. 施工事例カテゴリ（任意）' } ) );
-			wrap.appendChild( h( 'p', { class: 'description', text: '選ばなければ、AIが一覧から合うものを選びます（保存の前に変えられます）。' } ) );
+			wrap.appendChild( h( 'p', { class: 'description', text: '選ばなければ、AIが一覧から合うものを選びます。合うものがなければ、カテゴリなしで作ります（どちらも作成の後に変えられます）。' } ) );
 			wrap.appendChild( categoryChecks( opts.categories, f.terms, false, function ( c, on ) {
 				f.terms = f.terms.filter( function ( t ) { return t !== c.id; } );
 				if ( on ) {
@@ -558,6 +558,9 @@
 	// サーバーで1ステップずつ進める（外部呼び出しは1回のリクエストで最大1回）。
 	function pump() {
 		var job = state.job;
+		if ( job && job.mode === 'create' && job.status === 'proposal_ready' ) {
+			return toDraft( job );
+		}
 		if ( ! job || [ 'queued', 'analyzing' ].indexOf( job.status ) === -1 ) {
 			return Promise.resolve();
 		}
@@ -566,6 +569,42 @@
 			if ( [ 'queued', 'analyzing' ].indexOf( j.status ) !== -1 ) {
 				return new Promise( function ( r ) { window.setTimeout( r, 1500 ); } ).then( pump );
 			}
+			if ( j.mode === 'create' && j.status === 'proposal_ready' ) {
+				return toDraft( j );
+			}
+		} );
+	}
+
+	// 下書き案ができたら、すぐ下書きとして保存し、その下書きを修正する画面にする（プレビューを別のタブで見ながら直せるように）。
+	function toDraft( job ) {
+		return api( 'jobs/' + job.job_id + '/save', 'POST', { base_index: job.version_index } ).then( function ( saved ) {
+			try { window.sessionStorage.removeItem( FORM_KEY ); } catch ( e ) {}
+			state.form = loadForm();
+			state.carry = { post_id: saved.post_id, questions: job.questions || [] };
+			return api( 'jobs', 'POST', {
+				client_case_id: 'wpaic-rev-' + saved.post_id,
+				idempotency_key: uuid(),
+				mode: 'revise_draft',
+				post_type: 'works',
+				post_id: saved.post_id,
+				base_version: 1,
+				consent_external_ai: true
+			} );
+		} ).then( setJob );
+	}
+
+	// 下書きを修正しているときは、変更のたびに下書きへすぐ反映する。
+	function afterChange( j ) {
+		setJob( j );
+		if ( ! j || j.mode !== 'revise_draft' || j.status !== 'proposal_ready' ) {
+			return;
+		}
+		return api( 'jobs/' + j.job_id + '/sync', 'POST', { base_index: j.version_index } ).then( function ( s ) {
+			state.syncError = null;
+			setJob( s );
+		} ).catch( function ( e ) {
+			state.syncError = e;
+			render();
 		} );
 	}
 
@@ -610,7 +649,7 @@
 	function revise( body ) {
 		var job = state.job;
 		body.base_index = job.version_index;
-		return busy( function () { return api( 'jobs/' + job.job_id + '/revise', 'POST', body ).then( setJob ); } );
+		return busy( function () { return api( 'jobs/' + job.job_id + '/revise', 'POST', body ).then( afterChange ); } );
 	}
 	function op( section, operation ) {
 		operation.section = section;
@@ -622,17 +661,30 @@
 		var wrap = h( 'div', { class: 'wpaic-proposal' } );
 		var head = h( 'div', { class: 'wpaic-toolbar' },
 			h( 'strong', { text: '下書き案（版 ' + ( job.version_index + 1 ) + ' / ' + job.version_count + '）' } ), ' ',
-			h( 'button', { type: 'button', class: 'button', disabled: state.busy || job.version_index <= 0, on: { click: function () { busy( function () { return api( 'jobs/' + job.job_id + '/undo', 'POST', { base_index: job.version_index } ).then( setJob ); } ); } } }, '元に戻す' ), ' ',
-			h( 'button', { type: 'button', class: 'button', disabled: state.busy || job.version_index >= job.version_count - 1, on: { click: function () { busy( function () { return api( 'jobs/' + job.job_id + '/redo', 'POST', { base_index: job.version_index } ).then( setJob ); } ); } } }, 'やり直す' ), ' ',
+			h( 'button', { type: 'button', class: 'button', disabled: state.busy || job.version_index <= 0, on: { click: function () { busy( function () { return api( 'jobs/' + job.job_id + '/undo', 'POST', { base_index: job.version_index } ).then( afterChange ); } ); } } }, '元に戻す' ), ' ',
+			h( 'button', { type: 'button', class: 'button', disabled: state.busy || job.version_index >= job.version_count - 1, on: { click: function () { busy( function () { return api( 'jobs/' + job.job_id + '/redo', 'POST', { base_index: job.version_index } ).then( afterChange ); } ); } } }, 'やり直す' ), ' ',
+			job.mode === 'revise_draft' && job.preview_url ? h( 'a', { class: 'button button-primary', href: job.preview_url, target: 'wpaic-preview-' + job.post_id, rel: 'noopener' }, 'プレビューを開く（別のタブ）' ) : null, ' ',
 			h( 'span', { class: 'description', text: 'まだ公開されていません。保存しても「下書き」になります。' } ) );
 		wrap.appendChild( head );
+		if ( job.mode === 'revise_draft' ) {
+			if ( state.syncError ) {
+				wrap.appendChild( errorBox( state.syncError.error, state.syncError.fields ) );
+				wrap.appendChild( h( 'p', { class: 'wpaic-danger', text: '直前の変更を下書きに反映できませんでした。上の内容を確認してください（画面の案には残っています）。' } ) );
+			} else if ( job.last_sync ) {
+				var t = new Date( job.last_sync.at * 1000 );
+				wrap.appendChild( h( 'p', { class: 'wpaic-synced', role: 'status', text: '下書きに反映しました（' + ( '0' + t.getHours() ).slice( -2 ) + ':' + ( '0' + t.getMinutes() ).slice( -2 ) + '）。プレビューのタブを再読み込みすると確認できます。' } ) );
+			}
+		}
 		var cb = costBox( job.cost );
 		if ( cb ) {
 			wrap.appendChild( cb );
 		}
 		var revising = job.mode === 'revise_draft';
 		if ( revising && job.target ) {
-			wrap.appendChild( h( 'div', { class: 'notice notice-info inline' }, h( 'p', { text: '「' + job.target.title + '」を修正しています。保存すると、この下書きのうち変更した部分だけを書き換えます（公開はされません）。' } ) ) );
+			wrap.appendChild( h( 'div', { class: 'notice notice-info inline' }, h( 'p', { text: '「' + job.target.title + '」を修正しています。「反映」や「AIで修正」をすると、変更した部分だけをすぐこの下書きに書き込みます（公開はされません）。プレビューは別のタブで開き、再読み込みして確認してください。' } ) ) );
+			if ( state.carry && state.carry.post_id === job.post_id && state.carry.questions.length ) {
+				wrap.appendChild( h( 'div', { class: 'notice notice-info inline' }, h( 'p', { text: 'AIから確認したいこと（必要なら下の項目に追記してください）：' } ), h( 'ul', {}, state.carry.questions.map( function ( q ) { return h( 'li', { text: q } ); } ) ) ) );
+			}
 			if ( job.target.edited && job.target.edited.length ) {
 				wrap.appendChild( h( 'div', { class: 'notice notice-warning inline' },
 					h( 'p', { text: '次の部分は、保存後に編集画面で変更されています。これらに関わる修正は保存できません（編集画面で直接直してください）：' } ),
@@ -793,7 +845,12 @@
 				}
 			}
 			var kind = KIND_LABELS[ s.kind ] || s.kind;
-			var hd = bindDraft( h( 'input', { type: 'text', class: 'large-text', 'aria-label': kind + '：見出し' } ), 'sec:' + s.node_id + ':h', s.heading );
+			var noHeading = s.kind === 'before' || s.kind === 'after';
+			var hd = bindDraft( h( 'input', { type: 'text', class: 'large-text', 'aria-label': kind + '：見出し', hidden: noHeading } ), 'sec:' + s.node_id + ':h', s.heading );
+			if ( noHeading ) {
+				hd.style.display = 'none';
+				note = note || h( 'p', { class: 'description', text: '施工前・施工後は小見出しを付けず、文章だけを出します。' } );
+			}
 			var bd = bindDraft( h( 'textarea', { rows: 3, class: 'large-text', 'aria-label': kind + '：本文' } ), 'sec:' + s.node_id + ':b', s.body );
 			var thumbs = h( 'div', { class: 'wpaic-thumbs' }, shown.map( function ( id ) { return job.images[ id ] ? h( 'img', { src: job.images[ id ].thumb, alt: '', width: 64, height: 64 } ) : null; } ) );
 			wrap.appendChild( h( 'div', { class: 'wpaic-section' }, h( 'span', { class: 'wpaic-kind', text: kind } ), hd, bd, thumbs, note,
@@ -816,12 +873,12 @@
 		doc.images.forEach( function ( img, i ) {
 			var phase = h( 'select', { disabled: state.busy, on: { change: function ( e ) { op( 'before_after', { op: 'image_phase_set', attachment_id: img.attachment_id, phase: e.target.value } ); } } } );
 			Object.keys( PHASES ).forEach( function ( k ) { phase.appendChild( h( 'option', { value: k, selected: img.phase === k, text: k === 'unknown' ? '不明' : PHASES[ k ] } ) ); } );
-			var cap = bindDraft( h( 'input', { type: 'text', placeholder: 'キャプション', 'aria-label': '写真' + ( i + 1 ) + 'のキャプション' } ), 'cap:' + img.attachment_id, img.caption );
+			var cap = bindDraft( h( 'input', { type: 'text', placeholder: 'メモ（ページには出ません）', 'aria-label': '写真' + ( i + 1 ) + 'のメモ' } ), 'cap:' + img.attachment_id, img.caption );
 			grid.appendChild( h( 'div', { class: 'wpaic-card' + ( img.included ? '' : ' is-excluded' ) },
 				job.images[ img.attachment_id ] ? h( 'img', { src: job.images[ img.attachment_id ].medium || job.images[ img.attachment_id ].thumb, alt: '' } ) : null,
 				h( 'p', { class: 'description', text: img.description + ( img.uncertain ? '（工程は推定）' : '' ) } ),
 				phase, cap,
-				h( 'button', { type: 'button', class: 'button button-small', disabled: state.busy, on: { click: function () { op( 'photos', { op: 'image_caption_set', attachment_id: img.attachment_id, caption: cap.value } ); } } }, 'キャプション反映' ),
+				h( 'button', { type: 'button', class: 'button button-small', disabled: state.busy, on: { click: function () { op( 'photos', { op: 'image_caption_set', attachment_id: img.attachment_id, caption: cap.value } ); } } }, 'メモを反映' ),
 				h( 'label', {}, h( 'input', { type: 'checkbox', checked: !! img.included, disabled: state.busy, on: { change: function ( e ) { op( 'photos', { op: 'image_visibility_set', attachment_id: img.attachment_id, included: e.target.checked } ); } } } ), ' 記事に使う' ),
 				h( 'span', {},
 					h( 'button', { type: 'button', class: 'button-link', disabled: state.busy || i === 0, on: { click: function () { var o = order.slice(); o.splice( i - 1, 0, o.splice( i, 1 )[ 0 ] ); op( 'photos', { op: 'image_order_set', attachment_ids: o } ); } } }, '← 前へ' ), ' ',
@@ -864,6 +921,16 @@
 				updateDirty();
 				return;
 			}
+			if ( revising ) {
+				if ( state.syncError && ! window.confirm( '下書きに反映できていない変更があります。編集を終えると、その変更は失われます。よろしいですか？' ) ) {
+					return;
+				}
+				busy( function () { return api( 'jobs/' + job.job_id + '/cancel', 'POST', {} ).then( function () {
+					state.syncError = null;
+					setJob( { status: 'committed', mode: 'revise_draft', finished: true, edit_url: job.edit_url, preview_url: job.preview_url, saved_changes: [] } );
+				} ); } );
+				return;
+			}
 			busy( function () { return api( 'jobs/' + job.job_id + '/save', 'POST', { base_index: job.version_index } ).then( function ( j ) {
 				if ( ! revising ) {
 					try { window.sessionStorage.removeItem( FORM_KEY ); } catch ( e ) {}
@@ -871,11 +938,11 @@
 				}
 				setJob( j );
 			} ); } );
-		} } }, state.busy ? '処理中…' : ( revising ? '下書きを更新' : '下書きとして保存' ) );
+		} } }, state.busy ? '処理中…' : ( revising ? '編集を終える' : '下書きとして保存' ) );
 		discardBtn = h( 'button', { type: 'button', class: 'button', on: { click: function () { state.drafts = {}; render(); } } }, '未反映の変更を破棄' );
 		wrap.appendChild( dirtyMsg );
 		wrap.appendChild( h( 'p', { class: 'wpaic-actions' }, saveBtn, ' ', discardBtn, ' ',
-			h( 'button', { type: 'button', class: 'button', disabled: state.busy, on: { click: cancelJob } }, revising ? '修正をやめる' : '取り消す' ) ) );
+			revising ? null : h( 'button', { type: 'button', class: 'button', disabled: state.busy, on: { click: cancelJob } }, '取り消す' ) ) );
 		updateDirty();
 		return wrap;
 	}
@@ -886,12 +953,16 @@
 		var cats = ( state.options && state.options.categories ) || [];
 		function send( body ) {
 			body.base_index = job.version_index;
-			busy( function () { return api( 'jobs/' + job.job_id + '/meta', 'POST', body ).then( setJob ); } );
+			busy( function () { return api( 'jobs/' + job.job_id + '/meta', 'POST', body ).then( afterChange ); } );
 		}
 		var box = h( 'div', { class: 'wpaic-meta' }, h( 'h2', { text: '施工事例カテゴリ・アイキャッチ' } ) );
 		if ( cats.length ) {
 			var terms = ( meta.terms || [] ).slice();
-			box.appendChild( h( 'p', { class: 'description', text: meta.terms_source === 'ai' ? 'AIが候補から選びました。確認して、必要なら変えてください。' : '保存のときに下書きへ設定します。' } ) );
+			var catNote = job.mode === 'revise_draft' ? '変えると、すぐ下書きに設定します。' : '保存のときに下書きへ設定します。';
+			if ( meta.terms_source === 'ai' ) {
+				catNote = terms.length ? 'AIが候補から選びました。確認して、必要なら変えてください。' : 'AIは合うカテゴリを見つけられませんでした（カテゴリなしで保存します）。必要なら選んでください。';
+			}
+			box.appendChild( h( 'p', { class: 'description', text: catNote } ) );
 			box.appendChild( categoryChecks( cats, terms, state.busy, function ( c, on ) {
 				var next = terms.filter( function ( t ) { return t !== c.id; } );
 				if ( on ) {
@@ -920,7 +991,7 @@
 		var changes = job.saved_changes || [];
 		return h( 'div', { class: 'wpaic-done' }, costBox( job.cost ),
 			h( 'div', { class: 'notice notice-success inline' },
-				h( 'p', { text: revised ? ( changes.length ? '下書きを更新しました（まだ公開されていません）。' : '変更がなかったため、下書きは書き換えていません。' ) : '施工事例の下書きとして保存しました（まだ公開されていません）。' } ),
+				h( 'p', { text: job.finished ? '編集を終えました。変更はすべて下書きに反映済みです（まだ公開されていません）。' : ( revised ? ( changes.length ? '下書きを更新しました（まだ公開されていません）。' : '変更がなかったため、下書きは書き換えていません。' ) : '施工事例の下書きとして保存しました（まだ公開されていません）。' ) } ),
 				revised && changes.length ? h( 'p', { text: '更新した部分：' + changes.join( '、' ) } ) : null ),
 			h( 'p', {},
 				job.edit_url ? h( 'a', { class: 'button button-primary', href: job.edit_url }, '編集画面で開く' ) : null, ' ',

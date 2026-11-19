@@ -109,6 +109,15 @@ final class MappingPage {
 				DisplayNotes::approve( $user );
 				self::flash( 'success', '表示メモを承認しました。これから作る・修正する下書きで使います。', $back );
 			}
+			if ( 'example_set' === $op ) {
+				$id = isset( $_POST['example_post'] ) ? absint( $_POST['example_post'] ) : 0;
+				try {
+					\WpAiCase\Display\StyleExample::set( $id );
+				} catch ( \InvalidArgumentException $e ) {
+					throw new CaseError( CaseError::INVALID_TRANSITION, $e->getMessage() );
+				}
+				self::flash( 'success', $id ? '書き方の手本を設定しました。これから作る・修正する下書きで使います。' : '書き方の手本を外しました。', $back );
+			}
 			if ( 'display_discard' === $op ) {
 				DisplayNotes::discard( $user );
 				self::flash( 'success', '表示メモを削除しました。標準のメモ（shipinc テーマで確かめた内容）を使います。', $back );
@@ -249,6 +258,38 @@ final class MappingPage {
 			self::form( 'display_discard', '', array(), '表示メモを削除する', 'delete', $back );
 		}
 		echo '</div></div>';
+	}
+
+	/**
+	 * 書き方の手本（任意）。
+	 */
+	private static function render_example( string $back ): void {
+		$current = \WpAiCase\Display\StyleExample::post_id();
+		echo '<h2>' . esc_html( '書き方の手本（任意）' ) . '</h2><div class="wpaic-map-card">';
+		echo '<p class="description">' . esc_html( 'このサイトの施工事例の記事を1つ選ぶと、その文章（コンセプト・ご要望・ご提案・施工前・中・後の文章と各欄の文字数）を、AI に書き方と長さの手本として渡します。手本の記事の事実（地名・材料・色など）は使わせません。お客様の声・担当スタッフのコメント・写真は渡しません。' ) . '</p>';
+		$posts = get_posts(
+			array(
+				'post_type'      => Plugin::POST_TYPE,
+				'post_status'    => array( 'publish', 'draft', 'private' ),
+				'posts_per_page' => 200,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'meta_query'     => array( array( 'key' => \WpAiCase\Draft\DraftWriter::POC_MARK, 'compare' => 'NOT EXISTS' ) ), // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			)
+		);
+		$opts = '<option value="0">' . esc_html( '（使わない）' ) . '</option>';
+		foreach ( $posts as $p ) {
+			$opts .= sprintf( '<option value="%d"%s>%s</option>', (int) $p->ID, selected( $current, (int) $p->ID, false ), esc_html( html_entity_decode( get_the_title( $p ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) . '（ID: ' . $p->ID . ( 'publish' !== $p->post_status ? '・' . $p->post_status : '' ) . '）' ) );
+		}
+		$ex = \WpAiCase\Display\StyleExample::for_prompt();
+		if ( $current && $ex ) {
+			$l = $ex['lengths'];
+			printf( '<p>%s</p>', esc_html( sprintf( '使用中：ID %d（説明 %d字・ご要望 %d字・ご提案 %d字・施工前 %d字・施工中 %s字・施工後 %d字）', $current, $l['summary'], $l['request'], $l['proposal'], $l['before'], implode( '／', $l['during'] ) ?: '0', $l['after'] ) ) );
+		} elseif ( $current ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html( '選んだ記事から文章を読み取れませんでした（削除されたか、文章の欄が空です）。' ) . '</p></div>';
+		}
+		self::form( 'example_set', '', array(), '手本を保存', 'secondary', $back, '<p><select name="example_post" style="max-width:100%">' . $opts . '</select></p>' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- 上で組み立てたエスケープ済みの選択肢
+		echo '</div>';
 	}
 
 	/**
@@ -407,6 +448,7 @@ final class MappingPage {
 		echo '</form>';
 
 		self::render_display( $extra );
+		self::render_example( $extra );
 
 		echo '<h2>' . esc_html( '検証用の下書き・画像' ) . '</h2><p class="description">' . esc_html( '検証用の下書き（【検証用】）は下書きのままで公開されません。承認すると、その版の検証用の下書きは自動で削除されます。' ) . '</p>';
 		self::form( 'cleanup_all', '', array(), '検証用の下書きと画像をすべて削除', 'delete', $extra );

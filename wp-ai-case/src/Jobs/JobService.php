@@ -497,6 +497,7 @@ final class JobService {
 			'instruction'      => $instruction,
 			'article_policy'   => (string) ( $job['data']['input']['article_policy'] ?? '' ),
 			'display_notes'    => \WpAiCase\Display\DisplayNotes::for_prompt(),
+			'style_example'    => \WpAiCase\Display\StyleExample::for_prompt(),
 		);
 		try {
 			$this->cost->check( 'revise', CostGuard::estimate( Settings::model(), 0, strlen( (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) )['usd'] );
@@ -590,6 +591,42 @@ final class JobService {
 	}
 
 	/**
+	 * 修正中の下書きに、いまの案をすぐ反映する（修正は続けられる。プレビューを別のタブで見ながら直すため）。
+	 * 保存の決まり（変わった部分だけ・編集画面で人が変えた部分には重ねない・版の確認）は「下書きを更新」と同じ。
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function sync( string $job_id, int $user, int $base_index ): array {
+		$job = $this->editable( $job_id, $user, $base_index );
+		if ( 'revise_draft' !== $job['mode'] ) {
+			throw JobError::code( 'AI-012', 'sync_not_revise', 409 );
+		}
+		$data    = $job['data'];
+		$post_id = (int) $data['input']['post_id'];
+		$mapping = $this->mappings->repository()->get( (string) $data['snapshot']['mapping_id'], (int) $data['snapshot']['mapping_version'] );
+		try {
+			if ( ! $mapping || 'approved_active' !== $mapping['status'] ) {
+				throw new CaseError( CaseError::MAPPING_NOT_READY, '修正を始めた後にマッピングが変わりました' );
+			}
+			$result = $this->save_revision( $data, $data['versions'][ $base_index ], $user, $mapping );
+		} catch ( CaseError $e ) {
+			$fields = CaseError::EDITED_BY_HAND === $e->reason ? array( 'fields' => array_values( array_map( 'strval', (array) ( $e->context['fields'] ?? array() ) ) ) ) : array();
+			throw new JobError( SafeErrorPresenter::from_case_error( $e, 'customer', 'sync_failed' ), in_array( $e->reason, array( CaseError::MAPPING_NOT_READY, CaseError::SCHEMA_CHANGED ), true ) ? 503 : 409, $fields );
+		}
+		clean_post_cache( $post_id );
+		$post                                  = get_post( $post_id );
+		$data['snapshot']['post_modified_gmt'] = $post ? (string) $post->post_modified_gmt : $data['snapshot']['post_modified_gmt'];
+		$data['snapshot']['doc_version']       = DraftState::version( $post_id );
+		$data['meta_open']                     = self::post_meta_values( $post_id );
+		$data['last_sync']                     = array(
+			'at'      => time(),
+			'changed' => DraftState::labels( (array) ( $result['changed_slots'] ?? array() ) ),
+		);
+		$data['error']                         = null;
+		return $this->repo->compare_and_set( $job, array( 'data' => $data ) );
+	}
+
+	/**
 	 * 既存の下書きへの保存。版を先に1つ進めて（同時に2つの画面から保存されても後の方は止まる）、
 	 * 変わった部分だけを書き、保存後の状態を記録する。
 	 *
@@ -665,6 +702,7 @@ final class JobService {
 			'expires_at'      => $job['expires_at'],
 			'cost'            => self::cost_view( $data, $user ),
 			'meta'            => $data['meta'] ?? null,
+			'last_sync'       => $data['last_sync'] ?? null,
 		);
 	}
 
@@ -741,6 +779,9 @@ final class JobService {
 		$facts   = array();
 		foreach ( \WpAiCase\AI\Prompts::EXTRACT_FACTS as $f ) {
 			$v = 'area' === $f ? ResultAssembler::line( (string) ( $content['facts'][ $f ] ?? '' ), 100 ) : ResultAssembler::text( (string) ( $content['facts'][ $f ] ?? '' ), CaseInputValidator::MAX_TEXT );
+			if ( 'customer_voice' === $f ) {
+				$v = PageImporter::clean_voice( $v );
+			}
 			if ( '' !== $v ) {
 				$facts[ $f ] = $v;
 			}
@@ -972,6 +1013,7 @@ final class JobService {
 			'photo_set_description' => $data['input']['photo_set_description'],
 			'article_policy'        => (string) ( $data['input']['article_policy'] ?? '' ),
 			'display_notes'         => \WpAiCase\Display\DisplayNotes::for_prompt(),
+			'style_example'         => \WpAiCase\Display\StyleExample::for_prompt(),
 			'categories'            => (array) ( $data['input']['terms'] ?? array() ) ? array() : self::categories(),
 			'staff_comment_needed'  => array_values( array_map( static fn( $i ) => $i + 1, array_keys( array_filter( array_values( (array) ( $data['input']['relations']['staff'] ?? array() ) ), static fn( $s ) => '' === (string) $s['comment'] ) ) ) ),
 			'images'                => $list,

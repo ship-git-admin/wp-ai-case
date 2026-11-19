@@ -203,6 +203,21 @@ final class PageImporter {
 		return array( 'attachment_id' => (int) $id, 'thumb' => (string) wp_get_attachment_image_url( (int) $id, 'thumbnail' ), 'reused' => false );
 	}
 
+	/**
+	 * お客様の声：行の頭の【施工後】【お客様の声】のような小見出しと、小見出しだけの行を除く（文章はそのまま）。
+	 */
+	public static function clean_voice( string $v ): string {
+		$lines = array();
+		foreach ( preg_split( '/\R/u', $v ) ?: array() as $line ) {
+			$line = (string) preg_replace( '/^\s*(?:[【\[［]\s*[^】\]］]{1,12}\s*[】\]］]\s*)+/u', '', $line );
+			$line = (string) preg_replace( '/^\s*(?:VOICE|お客様の声|お客様からの声)\s*[:：]?\s*$/iu', '', $line );
+			if ( '' !== trim( $line ) ) {
+				$lines[] = trim( $line );
+			}
+		}
+		return implode( "\n", $lines );
+	}
+
 	/** 縮小版（-300x200）の URL なら、元の大きさの URL。違えば ''。 */
 	public static function original_size( string $url ): string {
 		$fixed = (string) preg_replace( '#-\d+x\d+(\.(?:jpe?g|png|webp))(\?.*)?$#i', '$1', $url );

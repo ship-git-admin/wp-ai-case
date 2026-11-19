@@ -58,3 +58,4 @@
 /* 長い選択肢（お客様の声の題名など）で画面の幅を超えないように */
 .wpaic select { max-width: 100%; }
 .wpaic-form label { overflow-wrap: anywhere; }
+.wpaic-synced { color: #00450c; background: #edfaef; border-left: 4px solid #00a32a; padding: 6px 10px; margin: 8px 0; }

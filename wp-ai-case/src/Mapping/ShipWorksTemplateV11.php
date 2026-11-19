@@ -11,6 +11,14 @@
  * - 施工後：1枚目の写真を大きく → 見出し＋文章 → 残りの写真
  * - 写真の下の説明文（_Txt）は空にし、短い見出し（_Title）だけを入れる
  *
+ * 書き方 1.3（2026-11-19、手本の事例と実際に作った記事を比べて）：
+ * - 写真の見出し（_Title）も空にする（手本はすべて空）
+ * - 施工前・施工後の文章は小見出しを付けず、文章だけにする（手本と同じ）
+ * - 写真の縦横で表示の設定を決める：縦長の写真は「縦長用リサイズ」（_Trim）を ON、
+ *   4:3 から外れる横長・正方形の写真があるまとまりは「トリミング解除」（_Trim02）を ON、トップの写真の縦長も同じ
+ * - トップの写真・施工後の大きい1枚は、写真の並びの1枚目のまま（縦長なら縦長用リサイズを ON。写真は差し替えない）
+ * ACF の構造（論理名）は 1.2 と同じなので、TEMPLATE_VERSION は変えない（マッピングはそのまま使える）。
+ *
  * CaseDocument（ACF非依存）から「テンプレートの論理名で書いた値ツリー」を作る。
  * - 論理名は、このテンプレートが前提とする構造（logical_schema）の名前。
  * - 実際の保存先（field key・名前・型・階層）は、サイトごとに承認されたマッピング（bindings）で
@@ -32,6 +40,11 @@ final class ShipWorksTemplateV11 {
 
 	public const TEMPLATE_ID      = 'ship-works';
 	public const TEMPLATE_VERSION = '1.2';
+	/** 書き方（値の入れ方）の版。構造は TEMPLATE_VERSION のまま。 */
+	public const WRITING_VERSION = '1.3';
+
+	/** 試験用：画像の大きさ（attachment_id => [幅, 高さ]）。指定がなければメディアの情報を使う。 */
+	private array $dims = array();
 
 	/** 文章の節（本文ではない）の node_id。 */
 	public const PROSE_NODES = array( 'request', 'proposal' );
@@ -203,7 +216,8 @@ final class ShipWorksTemplateV11 {
 	 * @return array{post:array<string,string>,fields:array<string,mixed>,hero:string,image_ids:int[]}
 	 */
 	public function build( array $doc, array $options = array() ): array {
-		$images   = $this->included_images( $doc['images'] );
+		$this->dims = (array) ( $options['dims'] ?? array() );
+		$images     = $this->included_images( $doc['images'] );
 		$by_phase = array(
 			'before'  => array(),
 			'during'  => array(),
@@ -218,10 +232,10 @@ final class ShipWorksTemplateV11 {
 		$fields = array( 'FV_Layout' => self::HERO_LAYOUT[ $hero ] );
 
 		if ( 'single' === $hero ) {
-			$main                         = $by_phase['after'][0] ?? $images[0];
+			$main                         = $this->main_image( $by_phase['after'] ) ?? $this->main_image( $images );
 			$fields['EntryData_CatchImg'] = array(
 				'EntryData_CatchImg02'      => $main['attachment_id'],
-				'EntryData_CatchImg02_Trim' => false,
+				'EntryData_CatchImg02_Trim' => $this->portrait( (int) $main['attachment_id'] ),
 			);
 		} elseif ( 'gallery' === $hero ) {
 			$rows = array();
@@ -229,16 +243,18 @@ final class ShipWorksTemplateV11 {
 				$rows[] = array(
 					'FV_Layout_Gallery_img'  => $image['attachment_id'],
 					'FV_Layout_Gallery_alt'  => (string) ( $image['caption'] ?? '' ),
-					'FV_Layout_Gallery_Trim' => false,
+					'FV_Layout_Gallery_Trim' => $this->portrait( (int) $image['attachment_id'] ),
 				);
 			}
 			$fields['FV_Layout_Gallery'] = $rows;
 		} else {
+			$before                          = $this->main_image( $by_phase['before'] );
+			$after                           = $this->main_image( $by_phase['after'] );
 			$fields['FV_Layout_BeforeAfter'] = array(
-				'FV_Layout_BeforeAfter_Image_Before' => $by_phase['before'][0]['attachment_id'],
-				'FV_Layout_BeforeAfter_Image_After'  => $by_phase['after'][0]['attachment_id'],
-				'FV_Layout_BeforeAfter_BeforeTrim'   => false,
-				'FV_Layout_BeforeAfter_AfterTrim'    => false,
+				'FV_Layout_BeforeAfter_Image_Before' => $before['attachment_id'],
+				'FV_Layout_BeforeAfter_Image_After'  => $after['attachment_id'],
+				'FV_Layout_BeforeAfter_BeforeTrim'   => $this->portrait( (int) $before['attachment_id'] ),
+				'FV_Layout_BeforeAfter_AfterTrim'    => $this->portrait( (int) $after['attachment_id'] ),
 			);
 		}
 
@@ -336,7 +352,7 @@ final class ShipWorksTemplateV11 {
 			$mae[] = $this->unit_row( 'EntryData_SectionMae_Unit', 'Mae', $by_phase['before'], self::grid( count( $by_phase['before'] ) ) );
 		}
 		foreach ( $of( 'before' ) as $section ) {
-			$mae[] = $sub( 'Mae', $section );
+			$mae[] = $sub( 'Mae', array( 'heading' => '', 'body' => $section['body'] ) ); // 小見出しなし（手本と同じ）
 		}
 
 		// 施工中：工程ごとに 見出しだけ → その工程の写真 → 文章だけ
@@ -353,17 +369,19 @@ final class ShipWorksTemplateV11 {
 			}
 		}
 
-		// 施工後：1枚目を大きく → 見出し＋文章 → 残りの写真
+		// 施工後：大きい1枚（1枚目）→ 文章 → 残りの写真
 		$go    = array();
 		$after = $by_phase['after'];
-		if ( $after ) {
-			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array( $after[0] ), self::UNIT_LARGE );
+		$big   = $this->main_image( $after );
+		if ( $big ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array( $big ), self::UNIT_LARGE );
 		}
 		foreach ( $of( 'after' ) as $section ) {
-			$go[] = $sub( 'Go', $section );
+			$go[] = $sub( 'Go', array( 'heading' => '', 'body' => $section['body'] ) ); // 小見出しなし（手本と同じ）
 		}
-		if ( count( $after ) > 1 ) {
-			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array_slice( $after, 1 ), self::grid( count( $after ) - 1 ) );
+		$rest = array_values( array_filter( $after, static fn( $i ) => $big && $i['attachment_id'] !== $big['attachment_id'] ) );
+		if ( $rest ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', $rest, self::grid( count( $rest ) ) );
 		}
 
 		foreach ( array( 'Mae' => $mae, 'Chu' => $chu, 'Go' => $go ) as $suffix => $entries ) {
@@ -412,12 +430,12 @@ final class ShipWorksTemplateV11 {
 				'acf_fc_layout'                => 'EntryData_SectionBeforeAfter_Unit',
 				'EntryData_PictureBeforeAfter' => array(
 					'EntryData_PictureBeforeAfter_Pop'          => true,
-					'EntryData_PictureBeforeAfter_Trim'         => false,
-					'EntryData_PictureBeforeAfter_Trim02'       => false,
+					'EntryData_PictureBeforeAfter_Trim'         => $this->portrait( (int) $before['attachment_id'] ) || $this->portrait( (int) $after['attachment_id'] ),
+					'EntryData_PictureBeforeAfter_Trim02'       => $this->off43( (int) $before['attachment_id'] ) || $this->off43( (int) $after['attachment_id'] ),
 					'EntryData_PictureBeforeAfter_Image_Before' => $before['attachment_id'],
 					'EntryData_PictureBeforeAfter_Image_After'  => $after['attachment_id'],
-					'EntryData_PictureBeforeAfter_Txt_Before'   => (string) ( $before['caption'] ?? '' ),
-					'EntryData_PictureBeforeAfter_Txt_After'    => (string) ( $after['caption'] ?? '' ),
+					'EntryData_PictureBeforeAfter_Txt_Before'   => '',
+					'EntryData_PictureBeforeAfter_Txt_After'    => '',
 				),
 			);
 		}
@@ -458,22 +476,61 @@ final class ShipWorksTemplateV11 {
 	 * @return array<string,mixed>
 	 */
 	private function unit_row( string $layout, string $process, array $images, string $unit_layout = self::UNIT_LAYOUT ): array {
-		$rows = array();
+		$rows    = array();
+		$untrim  = false;
 		foreach ( $images as $image ) {
-			$rows[] = array(
-				"EntryData_Picture{$process}_Image" => $image['attachment_id'],
-				"EntryData_Picture{$process}_Title" => (string) ( $image['caption'] ?? '' ),
+			$id      = (int) $image['attachment_id'];
+			$untrim  = $untrim || $this->off43( $id );
+			$rows[]  = array(
+				"EntryData_Picture{$process}_Image" => $id,
+				"EntryData_Picture{$process}_Title" => '', // 写真の見出しは出さない（手本と同じ）
 				"EntryData_Picture{$process}_Txt"   => '',
-				"EntryData_Picture{$process}_Trim"  => false,
+				"EntryData_Picture{$process}_Trim"  => $this->portrait( $id ), // 縦長用リサイズ
 			);
 		}
 		return array(
 			'acf_fc_layout'                      => $layout,
 			"EntryData_Picture{$process}_layout" => $unit_layout,
 			"EntryData_Picture{$process}_Pop"    => true,
-			"EntryData_Picture{$process}_Trim02" => false,
+			"EntryData_Picture{$process}_Trim02" => $untrim, // 4:3 のトリミング解除
 			"EntryData_Picture{$process}"        => $rows,
 		);
+	}
+
+	/**
+	 * 画像の幅 ÷ 高さ（分からなければ null）。
+	 */
+	public static function image_ratio( int $id, array $dims = array() ): ?float {
+		if ( isset( $dims[ $id ] ) ) {
+			[ $w, $h ] = $dims[ $id ];
+		} else {
+			$meta = function_exists( 'wp_get_attachment_metadata' ) ? wp_get_attachment_metadata( $id ) : false;
+			$w    = is_array( $meta ) ? (int) ( $meta['width'] ?? 0 ) : 0;
+			$h    = is_array( $meta ) ? (int) ( $meta['height'] ?? 0 ) : 0;
+		}
+		return ( $w > 0 && $h > 0 ) ? $w / $h : null;
+	}
+
+	/** 縦長（高さが幅の 1.05 倍を超える）。 */
+	private function portrait( int $id ): bool {
+		$r = self::image_ratio( $id, $this->dims );
+		return null !== $r && $r < 0.95;
+	}
+
+	/** 縦長ではなく、4:3 から外れる（横に長い・正方形に近い）。 */
+	private function off43( int $id ): bool {
+		$r = self::image_ratio( $id, $this->dims );
+		return null !== $r && $r >= 0.95 && abs( $r - 4 / 3 ) > 0.1;
+	}
+
+	/**
+	 * 大きく見せる1枚：写真の並びの1枚目（縦長でも差し替えず、縦長用リサイズで合わせる）。
+	 *
+	 * @param array<int,array<string,mixed>> $images
+	 * @return array<string,mixed>|null
+	 */
+	private function main_image( array $images ): ?array {
+		return $images[0] ?? null;
 	}
 
 	/** 写真の枚数に合わせた並べ方（3枚以上は PC 3列、それ以下は 2列）。 */

@@ -104,13 +104,14 @@ final class ArticleTests {
 				},
 				$rows
 			);
-			$this->t->same( array( 'unit:type-b:1,2', 'sub:01' ), $shape( $detail['EntryData_SectionMae'] ), '施工前' );
+			$this->t->same( array( 'unit:type-b:1,2', 'sub:03' ), $shape( $detail['EntryData_SectionMae'] ), '施工前（小見出しなし・文章だけ）' );
 			$this->t->same( array( 'sub:02', 'unit:type-b:3', 'sub:03', 'sub:02', 'sub:03' ), $shape( $detail['EntryData_SectionChu'] ), '施工中（工程2つ）' );
-			$this->t->same( array( 'unit:type-a:4', 'sub:01', 'unit:type-b:5' ), $shape( $detail['EntryData_SectionGo'] ), '施工後' );
+			$this->t->same( array( 'unit:type-a:4', 'sub:03', 'unit:type-b:5' ), $shape( $detail['EntryData_SectionGo'] ), '施工後（小見出しなし・文章だけ）' );
 			$this->t->same( 'sample heading during', $detail['EntryData_SectionChu'][0]['EntryData_Detail_Catch'], '工程の見出し' );
 			$this->t->same( 'sample body during', $detail['EntryData_SectionChu'][2]['EntryData_Detail_Text'], '工程の文章' );
 			$this->t->true( ! isset( $detail['EntryData_SectionChu'][0]['EntryData_Detail_Text'] ) && ! isset( $detail['EntryData_SectionChu'][2]['EntryData_Detail_Catch'] ), '見出しだけ・文章だけの行' );
 			$this->t->same( array( '' ), array_unique( array_column( $detail['EntryData_SectionMae'][0]['EntryData_PictureMae'], 'EntryData_PictureMae_Txt' ) ), '写真の下の説明文は空' );
+			$this->t->same( array( '' ), array_unique( array_column( $detail['EntryData_SectionMae'][0]['EntryData_PictureMae'], 'EntryData_PictureMae_Title' ) ), '写真の見出しも空（手本と同じ）' );
 			$feature = array();
 			foreach ( $built['fields']['Format'] as $row ) {
 				if ( 'Feature_Label' === $row['acf_fc_layout'] ) {
@@ -118,6 +119,28 @@ final class ArticleTests {
 				}
 			}
 			$this->t->same( array(), array_values( array_filter( $feature, static fn( $r ) => str_contains( (string) ( $r['Feature_SubtitleText_Subtitle'] ?? '' ), 'request' ) || str_contains( (string) ( $r['Feature_SubtitleText_Subtitle'] ?? '' ), 'proposal' ) ) ), 'ご要望・ご提案は特徴の欄に出さない' );
+		} );
+
+		$t->test( 'A-14', '写真の縦横で表示の設定を決める：縦長は「縦長用リサイズ」、4:3 から外れる横長は「トリミング解除」。トップの写真・施工後の大きい1枚は1枚目のまま（縦長なら縦長用リサイズ）', function () {
+			$doc  = SampleDocument::get();
+			$dims = array( 1 => array( 1478, 1108 ), 2 => array( 768, 1024 ), 3 => array( 2000, 819 ), 4 => array( 1108, 1477 ), 5 => array( 1477, 1108 ), 6 => array( 1000, 1000 ) );
+			$b    = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'before_after' ) );
+			$d    = $b['fields']['Format'][0]['EntryData_Group_Detail'];
+			$mae  = $d['EntryData_SectionMae'][0];
+			$this->t->same( array( false, true ), array_column( $mae['EntryData_PictureMae'], 'EntryData_PictureMae_Trim' ), '施工前：縦長の写真だけ縦長用リサイズ' );
+			$this->t->same( false, $mae['EntryData_PictureMae_Trim02'], '施工前：4:3 と縦長だけならトリミング解除しない' );
+			$chu = array_values( array_filter( $d['EntryData_SectionChu'], static fn( $r ) => 'EntryData_SectionChu_Unit' === $r['acf_fc_layout'] ) )[0];
+			$this->t->same( true, $chu['EntryData_PictureChu_Trim02'], '施工中：横に長い写真があればトリミング解除' );
+			$go = $d['EntryData_SectionGo'];
+			$this->t->same( array( 4, true ), array( $go[0]['EntryData_PictureGo'][0]['EntryData_PictureGo_Image'], $go[0]['EntryData_PictureGo'][0]['EntryData_PictureGo_Trim'] ), '施工後の大きい1枚は1枚目（縦長なので縦長用リサイズ）' );
+			$this->t->same( array( 5, false ), array( $go[2]['EntryData_PictureGo'][0]['EntryData_PictureGo_Image'], $go[2]['EntryData_PictureGo'][0]['EntryData_PictureGo_Trim'] ), '残りの横長はそのまま' );
+			$fv = $b['fields']['FV_Layout_BeforeAfter'];
+			$this->t->same( array( 1, 4, false, true ), array( $fv['FV_Layout_BeforeAfter_Image_Before'], $fv['FV_Layout_BeforeAfter_Image_After'], $fv['FV_Layout_BeforeAfter_BeforeTrim'], $fv['FV_Layout_BeforeAfter_AfterTrim'] ), 'トップの写真：After が縦長なら縦長用リサイズ' );
+			$only_portrait = array( 1 => array( 768, 1024 ), 2 => array( 768, 1024 ), 4 => array( 768, 1024 ), 5 => array( 768, 1024 ) );
+			$fv2 = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $only_portrait, 'hero' => 'before_after' ) )['fields']['FV_Layout_BeforeAfter'];
+			$this->t->same( array( true, true ), array( $fv2['FV_Layout_BeforeAfter_BeforeTrim'], $fv2['FV_Layout_BeforeAfter_AfterTrim'] ), '縦長しかなければ縦長用リサイズ' );
+			$g = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'gallery' ) )['fields']['FV_Layout_Gallery'];
+			$this->t->same( array( false, true, false, true, false, false ), array_column( $g, 'FV_Layout_Gallery_Trim' ), 'ギャラリーは縦長だけ縦長用リサイズ' );
 		} );
 
 		$t->test( 'A-03', '施工中の工程：写真は1回だけ使い、どの工程にも入らない写真は最後に見出しなしでまとめる', function () {
@@ -303,6 +326,7 @@ final class ArticleTests {
 			$r = $this->service( 'evil' )->import( array( 'html' => $html, 'consent_external_ai' => true ), $this->user );
 			$this->t->same( '模擬市', $r['facts']['area'], 'タグを除く' );
 			$this->t->same( 2000, mb_strlen( $r['facts']['customer_voice'] ), '長さを制限する' );
+			$this->t->same( "とても満足です。\n家族も喜んでいます。", \WpAiCase\Jobs\PageImporter::clean_voice( "VOICE\n【施工後】\nとても満足です。\n【お客様の声】家族も喜んでいます。" ), 'お客様の声の小見出しを除く' );
 		} );
 	}
 
@@ -441,6 +465,61 @@ final class ArticleTests {
 			update_field( $voice_key, '<p>手で入れた声</p>', $pid );
 			$this->t->same( array( 'EntryData_CustomerVoice' ), DraftState::edited_slots( $pid, $st, $mapping, $inspector->groups( $context ), array( 'EntryData_CustomerVoice' ) ), '値があれば編集した' );
 			$state['post'] = $pid;
+		} );
+
+		$this->t->test( 'A-15', 'プレビューしながら直す：修正中の下書きに変更をすぐ反映（修正は続けられる・版が進む）。編集画面で保存された後は反映しない（AI-012）', function () use ( &$state ) {
+			if ( empty( $state['post'] ) ) {
+				throw new SkipTest( 'A-10 が失敗' );
+			}
+			$pid = (int) $state['post'];
+			$s   = $this->service();
+			$job = $s->create( array( 'idempotency_key' => wp_generate_uuid4(), 'mode' => 'revise_draft', 'post_type' => 'works', 'post_id' => $pid, 'base_version' => DraftState::version( $pid ), 'consent_external_ai' => true ), $this->user );
+			$this->jobs[] = $job['job_id'];
+			$v0  = DraftState::version( $pid );
+			$job = $s->revise_local( $job['job_id'], $this->user, 0, array( 'title' ), array( array( 'op' => 'text_set', 'section' => 'title', 'value' => '反映の試験（1）' ) ) );
+			$job = $s->sync( $job['job_id'], $this->user, 1 );
+			clean_post_cache( $pid );
+			$this->t->same( array( 'proposal_ready', '反映の試験（1）', $v0 + 1 ), array( $job['status'], get_post( $pid )->post_title, DraftState::version( $pid ) ), '1回目の反映' );
+			$this->t->true( in_array( 'タイトル', (array) $job['data']['last_sync']['changed'], true ), '反映した部分' );
+			$job = $s->revise_local( $job['job_id'], $this->user, 1, array( 'seo' ), array( array( 'op' => 'seo_set', 'section' => 'seo', 'field' => 'h1', 'value' => '反映の試験 H1' ) ) );
+			$job = $s->sync( $job['job_id'], $this->user, 2 );
+			$this->t->same( array( 'proposal_ready', $v0 + 2 ), array( $job['status'], DraftState::version( $pid ) ), '2回目の反映（続けて直せる）' );
+			wp_update_post( array( 'ID' => $pid, 'post_title' => '編集画面で変えた' ) );
+			$job = $s->revise_local( $job['job_id'], $this->user, 2, array( 'title' ), array( array( 'op' => 'text_set', 'section' => 'title', 'value' => '反映の試験（2）' ) ) );
+			$e   = $this->err( fn() => $s->sync( $job['job_id'], $this->user, 3 ) );
+			clean_post_cache( $pid );
+			$this->t->same( array( 'AI-012', '編集画面で変えた' ), array( $e->response['error_code'], get_post( $pid )->post_title ), '編集画面で保存された後は反映しない（人の編集を残す）' );
+			$this->t->same( 'proposal_ready', $s->repository()->get( $job['job_id'] )['status'], '修正の画面は続けられる' );
+			$s->cancel( $job['job_id'], $this->user );
+		} );
+
+		$this->t->test( 'A-16', '書き方の手本：選んだ施工事例の記事の文章と文字数を作成の依頼に入れる（お客様の声などは入れない）。外せば入れない。施工事例以外は選べない', function () use ( &$state ) {
+			if ( empty( $state['post'] ) ) {
+				throw new SkipTest( 'A-10 が失敗' );
+			}
+			$saved = get_option( \WpAiCase\Display\StyleExample::OPTION, null );
+			try {
+				\WpAiCase\Display\StyleExample::set( (int) $state['post'] );
+				$ex = \WpAiCase\Display\StyleExample::for_prompt();
+				$this->t->true( is_array( $ex ) && '' !== $ex['summary'] && isset( $ex['lengths']['proposal'] ), '手本の文章' );
+				$this->t->same( array(), array_values( array_diff( array_keys( (array) $ex ), array( 'catch', 'summary', 'request', 'proposal', 'before', 'during', 'after', 'lengths' ) ) ), '入れる欄（お客様の声・担当コメントは入れない）' );
+				$this->t->true( str_contains( Prompts::compose_text( array( 'mode' => 'full', 'images' => array(), 'style_example' => $ex ) ), '"style_example"' ), '依頼の本文' );
+				$page = (int) ( get_posts( array( 'post_type' => 'page', 'posts_per_page' => 1, 'fields' => 'ids' ) )[0] ?? 0 );
+				if ( $page ) {
+					$threw = false;
+					try {
+						\WpAiCase\Display\StyleExample::set( $page );
+					} catch ( \InvalidArgumentException $e ) {
+						$threw = true;
+					}
+					$this->t->true( $threw, '施工事例以外は選べない' );
+				}
+				\WpAiCase\Display\StyleExample::set( 0 );
+				$this->t->same( null, \WpAiCase\Display\StyleExample::for_prompt(), '外せば入れない' );
+			} finally {
+				null === $saved ? delete_option( \WpAiCase\Display\StyleExample::OPTION ) : update_option( \WpAiCase\Display\StyleExample::OPTION, $saved, false );
+				\WpAiCase\Display\StyleExample::flush();
+			}
 		} );
 	}
 

@@ -116,6 +116,28 @@ final class DisplayCommand {
 	}
 
 	/**
+	 * 書き方の手本の記事を設定する（0 で外す）。引数なしなら今の手本を表示する。
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<post_id>]
+	 * : 施工事例の投稿 ID（0 で外す）。
+	 *
+	 * @param array<int,string>    $args
+	 * @param array<string,string> $assoc
+	 */
+	public function example( array $args, array $assoc ): void {
+		if ( isset( $args[0] ) ) {
+			try {
+				\WpAiCase\Display\StyleExample::set( (int) $args[0] );
+			} catch ( \InvalidArgumentException $e ) {
+				\WP_CLI::error( $e->getMessage() );
+			}
+		}
+		\WP_CLI::line( (string) wp_json_encode( array( 'post_id' => \WpAiCase\Display\StyleExample::post_id(), 'example' => \WpAiCase\Display\StyleExample::for_prompt() ), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) );
+	}
+
+	/**
 	 * 表示メモを削除する（標準のメモに戻る）。
 	 *
 	 * @param array<int,string>    $args

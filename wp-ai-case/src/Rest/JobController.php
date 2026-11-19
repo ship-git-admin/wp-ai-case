@@ -31,7 +31,7 @@ final class JobController {
 		register_rest_route( RestController::NS, '/import', array( 'methods' => 'POST', 'callback' => array( self::class, 'import' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/import/media', array( 'methods' => 'POST', 'callback' => array( self::class, 'import_media' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs/' . self::UUID, array( 'methods' => 'GET', 'callback' => array( self::class, 'show' ), 'permission_callback' => $perm ) );
-		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save', 'meta' ) as $action ) {
+		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save', 'meta', 'sync' ) as $action ) {
 			register_rest_route( RestController::NS, '/jobs/' . self::UUID . '/' . $action, array( 'methods' => 'POST', 'callback' => array( self::class, $action ), 'permission_callback' => $perm ) );
 		}
 	}
@@ -103,6 +103,11 @@ final class JobController {
 		} catch ( JobError $e ) {
 			return new \WP_Error( 'wpaic_error', $e->response['message'] ?? '', array( 'status' => $e->status, 'error' => $e->response ) + $e->extra );
 		}
+	}
+
+	public static function sync( \WP_REST_Request $r ) {
+		$base = (int) ( ( (array) $r->get_json_params() )['base_index'] ?? -1 );
+		return self::run( static fn( JobService $s, int $u ) => $s->sync( (string) $r['id'], $u, $base ) );
 	}
 
 	public static function meta( \WP_REST_Request $r ) {
