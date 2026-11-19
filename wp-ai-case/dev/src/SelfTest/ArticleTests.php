@@ -106,7 +106,7 @@ final class ArticleTests {
 			);
 			$this->t->same( array( 'unit:type-b:1,2', 'sub:03' ), $shape( $detail['EntryData_SectionMae'] ), '施工前（小見出しなし・文章だけ）' );
 			$this->t->same( array( 'sub:02', 'unit:type-b:3', 'sub:03', 'sub:02', 'sub:03' ), $shape( $detail['EntryData_SectionChu'] ), '施工中（工程2つ）' );
-			$this->t->same( array( 'unit:type-a:4', 'sub:03', 'unit:type-b:5' ), $shape( $detail['EntryData_SectionGo'] ), '施工後（小見出しなし・文章だけ）' );
+			$this->t->same( array( 'unit:type-b:4,5', 'sub:03' ), $shape( $detail['EntryData_SectionGo'] ), '施工後（写真は PC 2列・1列は使わない → 小見出しなしの文章）' );
 			$this->t->same( 'sample heading during', $detail['EntryData_SectionChu'][0]['EntryData_Detail_Catch'], '工程の見出し' );
 			$this->t->same( 'sample body during', $detail['EntryData_SectionChu'][2]['EntryData_Detail_Text'], '工程の文章' );
 			$this->t->true( ! isset( $detail['EntryData_SectionChu'][0]['EntryData_Detail_Text'] ) && ! isset( $detail['EntryData_SectionChu'][2]['EntryData_Detail_Catch'] ), '見出しだけ・文章だけの行' );
@@ -132,8 +132,7 @@ final class ArticleTests {
 			$chu = array_values( array_filter( $d['EntryData_SectionChu'], static fn( $r ) => 'EntryData_SectionChu_Unit' === $r['acf_fc_layout'] ) )[0];
 			$this->t->same( true, $chu['EntryData_PictureChu_Trim02'], '施工中：横に長い写真があればトリミング解除' );
 			$go = $d['EntryData_SectionGo'];
-			$this->t->same( array( 4, true ), array( $go[0]['EntryData_PictureGo'][0]['EntryData_PictureGo_Image'], $go[0]['EntryData_PictureGo'][0]['EntryData_PictureGo_Trim'] ), '施工後の大きい1枚は1枚目（縦長なので縦長用リサイズ）' );
-			$this->t->same( array( 5, false ), array( $go[2]['EntryData_PictureGo'][0]['EntryData_PictureGo_Image'], $go[2]['EntryData_PictureGo'][0]['EntryData_PictureGo_Trim'] ), '残りの横長はそのまま' );
+			$this->t->same( array( 'type-b', array( 4, 5 ), array( true, false ) ), array( $go[0]['EntryData_PictureGo_layout'], array_column( $go[0]['EntryData_PictureGo'], 'EntryData_PictureGo_Image' ), array_column( $go[0]['EntryData_PictureGo'], 'EntryData_PictureGo_Trim' ) ), '施工後は2列のまとまり1つ・縦長だけ縦長用リサイズ' );
 			$fv = $b['fields']['FV_Layout_BeforeAfter'];
 			$this->t->same( array( 1, 4, false, true ), array( $fv['FV_Layout_BeforeAfter_Image_Before'], $fv['FV_Layout_BeforeAfter_Image_After'], $fv['FV_Layout_BeforeAfter_BeforeTrim'], $fv['FV_Layout_BeforeAfter_AfterTrim'] ), 'トップの写真：After が縦長なら縦長用リサイズ' );
 			$only_portrait = array( 1 => array( 768, 1024 ), 2 => array( 768, 1024 ), 4 => array( 768, 1024 ), 5 => array( 768, 1024 ) );

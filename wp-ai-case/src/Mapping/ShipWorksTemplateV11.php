@@ -16,7 +16,8 @@
  * - 施工前・施工後の文章は小見出しを付けず、文章だけにする（手本と同じ）
  * - 写真の縦横で表示の設定を決める：縦長の写真は「縦長用リサイズ」（_Trim）を ON、
  *   4:3 から外れる横長・正方形の写真があるまとまりは「トリミング解除」（_Trim02）を ON、トップの写真の縦長も同じ
- * - トップの写真・施工後の大きい1枚は、写真の並びの1枚目のまま（縦長なら縦長用リサイズを ON。写真は差し替えない）
+ * - トップの写真は、写真の並びの1枚目のまま（縦長なら縦長用リサイズを ON。写真は差し替えない）
+ * - 施工後は 写真（PC 2列）→ 文章。1列（フルサイズ）は使わない（2026-11-19 依頼者の指示）
  * ACF の構造（論理名）は 1.2 と同じなので、TEMPLATE_VERSION は変えない（マッピングはそのまま使える）。
  *
  * CaseDocument（ACF非依存）から「テンプレートの論理名で書いた値ツリー」を作る。
@@ -369,19 +370,14 @@ final class ShipWorksTemplateV11 {
 			}
 		}
 
-		// 施工後：大きい1枚（1枚目）→ 文章 → 残りの写真
+		// 施工後：写真（PC 2列）→ 文章。1列（フルサイズ）は使わない。
 		$go    = array();
 		$after = $by_phase['after'];
-		$big   = $this->main_image( $after );
-		if ( $big ) {
-			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array( $big ), self::UNIT_LARGE );
+		if ( $after ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', $after, self::UNIT_LAYOUT );
 		}
 		foreach ( $of( 'after' ) as $section ) {
 			$go[] = $sub( 'Go', array( 'heading' => '', 'body' => $section['body'] ) ); // 小見出しなし（手本と同じ）
-		}
-		$rest = array_values( array_filter( $after, static fn( $i ) => $big && $i['attachment_id'] !== $big['attachment_id'] ) );
-		if ( $rest ) {
-			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', $rest, self::grid( count( $rest ) ) );
 		}
 
 		foreach ( array( 'Mae' => $mae, 'Chu' => $chu, 'Go' => $go ) as $suffix => $entries ) {

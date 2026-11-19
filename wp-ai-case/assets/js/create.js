@@ -824,7 +824,7 @@
 		} );
 		var leftDuring = duringIds.filter( function ( id ) { return ! used[ id ]; } );
 		wrap.appendChild( h( 'h2', { text: '本文' } ) );
-		wrap.appendChild( h( 'p', { class: 'description', text: '施工前・施工後の写真は、下の「写真」で選んだ工程ごとに入ります（施工後は1枚目を大きく表示）。施工中は工程ごとに、見出し → その工程の写真 → 説明 の順に並びます。' } ) );
+		wrap.appendChild( h( 'p', { class: 'description', text: '施工前・施工後の写真は、下の「写真」で選んだ工程ごとに入ります（写真 → 文章の順。施工後は PC で2列）。施工中は工程ごとに、見出し → その工程の写真 → 説明 の順に並びます。' } ) );
 		doc.sections.forEach( function ( s ) {
 			if ( s.node_id === 'intro' || PROSE_NODES.indexOf( s.node_id ) !== -1 ) {
 				return;
