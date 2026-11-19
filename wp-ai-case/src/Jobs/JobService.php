@@ -698,8 +698,9 @@ final class JobService {
 	}
 
 	/**
-	 * 既存ページの文章（HTML でもよい）から、入力欄の値を取り出す。下書きは作らない。
-	 * 写真は、ページの img が このサイトのメディアにあるものだけを返す（外部通信なし・自分が編集できる画像だけ）。
+	 * 既存ページの文章（HTML でもよい）から、入力欄の値と写真（位置・工程・説明）を取り出す。下書きは作らない。
+	 * 写真：このサイトのメディアにあるものは attachment_id を、ないものは url を返す（画面が import_media で1枚ずつ取り込む）。
+	 * AI がロゴ・バナーなどと判断した画像は返さない（数だけ返す）。
 	 *
 	 * @param array<string,mixed> $raw html（貼り付けた文章）, consent_external_ai
 	 * @return array<string,mixed>
@@ -712,8 +713,9 @@ final class JobService {
 		if ( true !== ( $raw['consent_external_ai'] ?? null ) ) {
 			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'import_consent_missing' ), 400, array( 'fields' => array( 'consent_external_ai' ) ) );
 		}
-		$html = is_string( $raw['html'] ?? null ) ? $raw['html'] : '';
-		$text = self::page_text( $html );
+		$html   = is_string( $raw['html'] ?? null ) ? $raw['html'] : '';
+		$parsed = PageImporter::parse( $html, $user );
+		$text   = $parsed['text'];
 		if ( mb_strlen( $text ) < 10 ) {
 			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'import_empty' ), 400, array( 'fields' => array( '貼り付けた内容から文章を読み取れませんでした' ) ) );
 		}
@@ -742,86 +744,58 @@ final class JobService {
 				$facts[ $f ] = $v;
 			}
 		}
+		$decided = array();
+		foreach ( (array) ( $content['photos'] ?? array() ) as $p ) {
+			if ( is_array( $p ) ) {
+				$decided[ (int) ( $p['no'] ?? 0 ) ] = $p;
+			}
+		}
+		$photos  = array();
+		$skipped = 0;
+		foreach ( $parsed['photos'] as $p ) {
+			$d = $decided[ (int) $p['no'] ] ?? array();
+			if ( array_key_exists( 'use', $d ) && true !== $d['use'] ) {
+				++$skipped;
+				continue;
+			}
+			$photos[] = array(
+				'no'            => (int) $p['no'],
+				'attachment_id' => (int) $p['attachment_id'],
+				'thumb'         => (string) $p['thumb'],
+				'url'           => $p['attachment_id'] || ! preg_match( '#^https?://#i', (string) $p['url'] ) ? '' : (string) $p['url'],
+				'phase'         => in_array( $d['phase'] ?? '', array( 'before', 'during', 'after' ), true ) ? (string) $d['phase'] : 'unknown',
+				'caption'       => ResultAssembler::caption( (string) ( $d['caption'] ?? '' ) ),
+				'alt'           => (string) $p['alt'],
+			);
+		}
+		// 写真の一覧は 施工前 → 施工中 → 施工後 → 不明 の順に（同じ工程の中はページの順）。
+		$rank = array( 'before' => 0, 'during' => 1, 'after' => 2, 'unknown' => 3 );
+		usort( $photos, static fn( $a, $b ) => array( $rank[ $a['phase'] ], $a['no'] ) <=> array( $rank[ $b['phase'] ], $b['no'] ) );
 		return array(
-			'title'         => ResultAssembler::line( (string) ( $content['title'] ?? '' ), 120 ),
-			'facts'         => $facts,
-			'staff_comment' => ResultAssembler::text( (string) ( $content['staff_comment'] ?? '' ), 600 ),
-			'images'        => self::page_images( $html, $user ),
-			'cost'          => $cost,
+			'title'          => ResultAssembler::line( (string) ( $content['title'] ?? '' ), 120 ),
+			'facts'          => $facts,
+			'staff_comment'  => ResultAssembler::text( (string) ( $content['staff_comment'] ?? '' ), 600 ),
+			'photos'         => $photos,
+			'photos_skipped' => $skipped,
+			'cost'           => $cost,
 		);
 	}
 
 	/**
-	 * 貼り付けた HTML（または文章）を、改行を残した文章にする（最大 2万字）。
-	 */
-	public static function page_text( string $html ): string {
-		$h = (string) preg_replace( '#<(script|style|noscript|template|svg|iframe)\b[^>]*>.*?</\1\s*>#is', ' ', $html );
-		$h = (string) preg_replace( '#<!--.*?-->#s', ' ', $h );
-		$h = (string) preg_replace( '#<br\s*/?>#i', "\n", $h );
-		$h = (string) preg_replace( '#</(p|div|li|tr|h[1-6]|dt|dd|section|article|table|ul|ol|figure|figcaption|blockquote|header|footer|main|aside)\s*>#i', "\n", $h );
-		$h = (string) preg_replace( '#<(td|th|dt|dd)\b[^>]*>#i', ' ', $h );
-		$t = wp_strip_all_tags( $h, false );
-		$t = html_entity_decode( $t, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-		$lines = array();
-		foreach ( preg_split( '/\R/u', $t ) ?: array() as $line ) {
-			$line = trim( (string) preg_replace( '/[\h\x{3000}]+/u', ' ', $line ) );
-			if ( '' !== $line ) {
-				$lines[] = $line;
-			}
-		}
-		return mb_substr( implode( "\n", $lines ), 0, 20000 );
-	}
-
-	/**
-	 * 貼り付けた HTML の img のうち、このサイトのメディアにある画像（ページの順・重複なし・最大200枚）。
-	 * 別のドメインの URL でも、アップロード先のパス（/wp-content/uploads/ 以降）が同じなら同じ画像とみなす。
+	 * 取り込みで見つけたページの画像を1枚、このサイトのメディアに取り込む（AI は使わない）。
 	 *
-	 * @return array<int,array<string,mixed>>
+	 * @param array<string,mixed> $raw url, title
+	 * @return array<string,mixed>
 	 */
-	public static function page_images( string $html, int $user ): array {
-		global $wpdb;
-		if ( ! preg_match_all( '#<img\b[^>]*>#i', $html, $tags ) ) {
-			return array();
+	public function import_media( array $raw, int $user ): array {
+		if ( ! user_can( $user, 'upload_files' ) ) {
+			throw JobError::code( 'AI-015', 'upload_forbidden', 403 );
 		}
-		$out  = array();
-		$seen = array();
-		foreach ( $tags[0] as $tag ) {
-			$src = '';
-			foreach ( array( 'data-src', 'src' ) as $attr ) {
-				if ( preg_match( '#\s' . $attr . '\s*=\s*(["\'])(.*?)\1#i', $tag, $m ) && '' !== trim( $m[2] ) && ! str_starts_with( trim( $m[2] ), 'data:' ) ) {
-					$src = html_entity_decode( trim( $m[2] ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-					break;
-				}
-			}
-			$path = (string) wp_parse_url( $src, PHP_URL_PATH );
-			$pos  = strpos( $path, '/uploads/' );
-			if ( false === $pos ) {
-				continue;
-			}
-			$file = rawurldecode( substr( $path, $pos + 9 ) );
-			$id   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s LIMIT 1", $file ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			if ( ! $id ) {
-				// 縮小版（-300x200）・WebP に変換した URL（.webp / .jpg.webp）・大きい画像の -scaled は、元のファイル名に戻して探す。
-				$base = (string) preg_replace( '/\.webp$/i', '', $file );
-				$base = (string) preg_replace( '/\.(jpe?g|png|gif|webp|avif)$/i', '', $base );
-				$base = (string) preg_replace( '/-(\d+x\d+|scaled)$/i', '', $base );
-				$id   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND ( meta_value LIKE %s OR meta_value LIKE %s ) ORDER BY post_id LIMIT 1", $wpdb->esc_like( $base ) . '.%', $wpdb->esc_like( $base ) . '-scaled.%' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			}
-			if ( ! $id || isset( $seen[ $id ] ) || ! wp_attachment_is_image( $id ) || ! user_can( $user, 'edit_post', $id ) ) {
-				continue;
-			}
-			$seen[ $id ] = true;
-			$alt         = preg_match( '#\salt\s*=\s*(["\'])(.*?)\1#i', $tag, $m ) ? ResultAssembler::line( html_entity_decode( $m[2], ENT_QUOTES | ENT_HTML5, 'UTF-8' ), 40 ) : '';
-			$out[]       = array(
-				'attachment_id' => $id,
-				'thumb'         => (string) wp_get_attachment_image_url( $id, 'thumbnail' ),
-				'alt'           => $alt,
-			);
-			if ( count( $out ) >= CaseInputValidator::MAX_IMAGES ) {
-				break;
-			}
+		try {
+			return PageImporter::sideload( (string) ( $raw['url'] ?? '' ), $user, ResultAssembler::line( (string) ( $raw['title'] ?? '' ), 100 ) );
+		} catch ( CaseError $e ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'import_media_' . (string) ( $e->context['reason'] ?? 'failed' ) ), 400, array( 'fields' => array( $e->getMessage() ) ) );
 		}
-		return $out;
 	}
 
 	/**

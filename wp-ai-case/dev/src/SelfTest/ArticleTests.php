@@ -41,6 +41,7 @@ final class ArticleTests {
 		wp_set_current_user( $this->user );
 		try {
 			$this->template();
+			$this->captions();
 			$this->assemble();
 			$this->patches();
 			$this->mapping();
@@ -50,6 +51,7 @@ final class ArticleTests {
 				return;
 			}
 			$this->import( $images );
+			$this->sideload();
 			$this->meta( $images );
 		} finally {
 			Settings::$test_status = null;
@@ -132,6 +134,22 @@ final class ArticleTests {
 				array_map( static fn( $s ) => array( $s[0]['node_id'] ?? null, array_column( $s[1], 'attachment_id' ) ), $steps ),
 				'工程ごとの写真'
 			);
+		} );
+	}
+
+	private function captions(): void {
+		$this->t->test( 'A-12', 'キャプション：工程の名前（テーマが見出しとして出す）を除き、「写真」「様子」だけなら空にする。AI による修正も同じ。利用者の入力はそのまま', function () {
+			$cases = array( '施工前' => '', '施工前の表示画像' => '', '施工後の様子' => '', '施工後の外壁' => '外壁', '外壁の色あせ（施工前）' => '外壁の色あせ', '【施工中】高圧洗浄' => '高圧洗浄', 'ビフォー' => '', '高圧洗浄' => '高圧洗浄', 'before' => '', '高圧洗浄で汚れを落としました。' => '', '落ち着いた色に仕上がりました' => '' );
+			$got   = array();
+			foreach ( array_keys( $cases ) as $c ) {
+				$got[ $c ] = ResultAssembler::caption( $c );
+			}
+			$this->t->same( $cases, $got, '変換' );
+			$doc = SampleDocument::get();
+			$r   = PatchApplier::apply( $doc, array( 'photos' ), array( array( 'op' => 'image_caption_set', 'section' => 'photos', 'attachment_id' => 1, 'caption' => '施工前の様子' ) ), true );
+			$this->t->same( '', $r['doc']['images'][0]['caption'], 'AI による修正' );
+			$r = PatchApplier::apply( $doc, array( 'photos' ), array( array( 'op' => 'image_caption_set', 'section' => 'photos', 'attachment_id' => 1, 'caption' => '施工前' ) ), false );
+			$this->t->same( '施工前', $r['doc']['images'][0]['caption'], '利用者の入力はそのまま' );
 		} );
 	}
 
@@ -239,15 +257,19 @@ final class ArticleTests {
 	 * @param array<string,int> $images
 	 */
 	private function import( array $images ): void {
-		$this->t->test( 'A-08', '既存ページの取り込み：タグ・スクリプトを除いた文章だけを送り、項目を取り出す。写真はこのサイトのメディアにあるものだけ（別ドメイン・縮小版の URL でも同じ画像）。同意がなければ送らない', function () use ( $images ) {
+		$this->t->test( 'A-08', '既存ページの取り込み：タグ・スクリプトを除いた文章（写真の位置に印）だけを送り、項目と写真（工程・説明・使うか）を取り出す。このサイトのメディアの画像は別ドメイン・縮小版でも見つけ、ないものはアドレスを返す。同意がなければ送らない', function () use ( $images ) {
 			$file = (string) get_post_meta( $images['before1'], '_wp_attached_file', true );
 			$ext  = (string) pathinfo( $file, PATHINFO_EXTENSION );
 			$thumb = substr( $file, 0, -strlen( $ext ) - 1 ) . '-300x200.' . $ext;
 			$html = '<div class="works"><h2>工事の概要</h2><script>alert("x")</script><p>住所&nbsp;試験市</p>'
 				. '<img src="https://old.example.com/wp-content/uploads/' . esc_attr( $thumb ) . '" alt="施工前">'
+				. '<img src="https://old.example.com/logo.png" alt="会社のロゴ">'
+				. '<h3>施工後</h3><img src="' . esc_url( wp_get_attachment_url( $images['after1'] ) ) . '" alt="施工後">'
 				. '<img src="' . esc_url( wp_get_attachment_url( $images['after1'] ) ) . '">'
-				. '<img src="' . esc_url( wp_get_attachment_url( $images['after1'] ) ) . '">'
-				. '<img src="https://cdn.example.net/photo.jpg"><p>VOICE お客様の声 とても満足です</p></div>';
+				. '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="1" height="1">'
+				. '<img src="https://cdn.example.net/photo.jpg" alt="足場の設置">'
+				. '<a href="https://cdn.example.net/full.jpg"><img src="https://cdn.example.net/full-300x200.jpg"></a>'
+				. '<img src="/icon.png" width="24" height="24"><p>VOICE お客様の声 とても満足です</p></div>';
 			MockProvider::$calls    = 0;
 			MockProvider::$payloads = array();
 			$s = $this->service();
@@ -260,13 +282,81 @@ final class ArticleTests {
 			$sent = (string) MockProvider::$payloads[0]['text'];
 			$this->t->true( ! str_contains( $sent, 'alert' ) && ! str_contains( $sent, '<' ) && str_contains( $sent, '住所 試験市' ) && str_contains( $sent, "工事の概要\n" ), '送る文章（タグ・スクリプトなし、改行は残す）' );
 			$this->t->same( array( 'model', 'text' ), array_keys( MockProvider::$payloads[0] ), '送る項目' );
-			$this->t->same( array( $images['before1'], $images['after1'] ), array_column( $r['images'], 'attachment_id' ), '写真（このサイトのメディアだけ・重複なし・ページの順）' );
+			$this->t->true( str_contains( $sent, '[写真1]（施工前）' ) && str_contains( $sent, "施工後\n[写真3]（施工後）" ), '写真の位置の印（見出しの近く）' );
+			$this->t->same( 2, substr_count( $sent, '[写真3]' ), '同じ写真が2回出たら同じ番号を2回' );
+			$this->t->true( ! str_contains( $sent, '[写真6]' ), 'データURI・小さいアイコンは写真にしない' );
+			$this->t->same(
+				array( array( $images['before1'], '' ), array( $images['after1'], '' ), array( 0, 'https://cdn.example.net/photo.jpg' ), array( 0, 'https://cdn.example.net/full.jpg' ) ),
+				array_map( static fn( $p ) => array( $p['attachment_id'], $p['url'] ), $r['photos'] ),
+				'写真（重複なし・工程の順（施工前→施工後→不明）・同じ工程はページの順。メディアにあるものは ID、ないものはアドレス。ポップアップのリンク先を元の大きさとして使う）'
+			);
+			$this->t->same( array( 1, 'after', '' ), array( $r['photos_skipped'], $r['photos'][1]['phase'], $r['photos'][1]['caption'] ), 'ロゴは除く・工程・工程名だけの説明は空' );
 			$this->t->true( str_starts_with( $r['facts']['overview'] ?? '', '【模擬】' ) && '模擬市' === ( $r['facts']['area'] ?? '' ), '取り出した項目' );
 			$this->t->true( ! isset( $r['facts']['cost'] ), '空の項目は返さない' );
 
 			$r = $this->service( 'evil' )->import( array( 'html' => $html, 'consent_external_ai' => true ), $this->user );
 			$this->t->same( '模擬市', $r['facts']['area'], 'タグを除く' );
 			$this->t->same( 2000, mb_strlen( $r['facts']['customer_voice'] ), '長さを制限する' );
+		} );
+	}
+
+	/**
+	 * ページの画像のメディアへの取り込み（HTTP は試験用の応答に差し替え、外へは通信しない）。
+	 */
+	private function sideload(): void {
+		$this->t->test( 'A-11', 'ページの画像の取り込み：縮小版なら元の大きさを先に取得・取り込み元を記録・同じアドレスは再利用・小さい画像／画像でない／認証が必要／内部アドレスは拒否・アップロード権限が必要', function () {
+			$jpeg = static function ( int $w, int $h ): string {
+				$im = imagecreatetruecolor( $w, $h );
+				imagefill( $im, 0, 0, imagecolorallocate( $im, 120, 160, 200 ) );
+				ob_start();
+				imagejpeg( $im, null, 80 );
+				return (string) ob_get_clean();
+			};
+			$asked = array();
+			$fake  = static function ( $pre, $args, $url ) use ( &$asked, $jpeg ) {
+				$asked[] = $url;
+				$map     = array(
+					'https://example.com/wp-content/uploads/2020/01/wpaic-selftest-photo.jpg' => array( 200, $jpeg( 640, 480 ) ),
+					'https://example.com/tiny.jpg'      => array( 200, $jpeg( 100, 80 ) ),
+					'https://example.com/not-image.jpg' => array( 200, 'hello' ),
+				);
+				[ $code, $body ] = $map[ $url ] ?? array( str_contains( $url, 'auth' ) ? 401 : 404, '' );
+				return array( 'headers' => array(), 'body' => $body, 'response' => array( 'code' => $code, 'message' => '' ), 'cookies' => array(), 'filename' => null );
+			};
+			add_filter( 'pre_http_request', $fake, 10, 3 );
+			$created = array();
+			try {
+				$s   = new JobService();
+				$url = 'https://example.com/wp-content/uploads/2020/01/wpaic-selftest-photo-300x200.jpg';
+				$r   = $s->import_media( array( 'url' => $url, 'title' => '足場の設置' ), $this->user );
+				$created[] = $r['attachment_id'];
+				$this->t->same( 'https://example.com/wp-content/uploads/2020/01/wpaic-selftest-photo.jpg', $asked[0] ?? '', '元の大きさを先に取得' );
+				$this->t->true( wp_attachment_is_image( $r['attachment_id'] ) && false === $r['reused'], 'メディアに登録' );
+				$this->t->same( array( $url, '足場の設置' ), array( get_post_meta( $r['attachment_id'], \WpAiCase\Jobs\PageImporter::META_SOURCE, true ), get_the_title( $r['attachment_id'] ) ), '取り込み元・タイトル' );
+				$n     = count( $asked );
+				$again = $s->import_media( array( 'url' => $url ), $this->user );
+				$this->t->same( array( $r['attachment_id'], true, $n ), array( $again['attachment_id'], $again['reused'], count( $asked ) ), '同じアドレスは再利用（取得しない）' );
+				foreach ( array( 'https://example.com/tiny.jpg' => '小さすぎる', 'https://example.com/not-image.jpg' => '写真', 'https://example.com/auth.jpg' => '認証', 'http://127.0.0.1/x.jpg' => 'アドレス', 'file:///etc/passwd' => 'アドレス' ) as $bad => $word ) {
+					$e = $this->err( fn() => $s->import_media( array( 'url' => $bad ), $this->user ) );
+					$this->t->true( 'AI-017' === $e->response['error_code'] && str_contains( (string) ( $e->extra['fields'][0] ?? '' ), $word ), "拒否 {$bad}" );
+				}
+				$deny = static function ( $allcaps ) {
+					$allcaps['upload_files'] = false;
+					return $allcaps;
+				};
+				add_filter( 'user_has_cap', $deny );
+				try {
+					$this->t->same( 'AI-015', $this->err( fn() => $s->import_media( array( 'url' => $url ), $this->user ) )->response['error_code'], 'アップロード権限なし' );
+				} finally {
+					remove_filter( 'user_has_cap', $deny );
+				}
+			} finally {
+				remove_filter( 'pre_http_request', $fake, 10 );
+				foreach ( $created as $id ) {
+					wp_delete_attachment( (int) $id, true );
+				}
+			}
+			$this->t->same( array(), array_values( array_filter( $created, static fn( $id ) => null !== get_post( (int) $id ) ) ), '試験の画像を削除した' );
 		} );
 	}
 

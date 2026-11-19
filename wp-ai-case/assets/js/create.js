@@ -415,7 +415,7 @@
 		var msg = state.importResult ? h( 'div', { class: 'notice notice-success inline' }, h( 'p', { text: state.importResult } ) ) : null;
 		return h( 'details', { class: 'wpaic-import', open: !! ( f.importText || state.importResult ) },
 			h( 'summary', {}, h( 'strong', { text: '既存のページから取り込む（任意）' } ) ),
-			h( 'p', { class: 'description', text: '貼り付けた内容から、AIが下の入力欄の項目（ご要望・施工内容・お客様からの声など）を取り出します。ページの写真のうち、このサイトのメディアにあるものは写真の一覧に追加します（写真はこの時点では送信しません）。取り込んだ内容は、確認・修正してから作成してください。' } ),
+			h( 'p', { class: 'description', text: '貼り付けた内容から、AIが下の入力欄の項目（ご要望・施工内容・お客様からの声など）と、ページの写真（工程・説明）を取り出します。写真は、このサイトのメディアになければダウンロードしてメディアに登録し、写真の一覧に入れます（自社のページの写真だけを使ってください。写真はこの時点ではAIへ送信しません）。取り込んだ内容は、確認・修正してから作成してください。' } ),
 			ta,
 			h( 'p', {}, h( 'label', {}, ok, ' 貼り付けた文章（タグを除いたもの）を ' + PROVIDER + ' へ送信することに同意します' ) ),
 			h( 'p', {}, h( 'button', { type: 'button', class: 'button', disabled: state.busy, on: { click: function () {
@@ -445,19 +445,54 @@
 					f.staff[ 0 ].comment = r.staff_comment;
 					staffSet = true;
 				}
-				var added = 0;
-				( r.images || [] ).forEach( function ( img ) {
-					if ( ! f.photos.some( function ( p ) { return p.id === img.attachment_id; } ) ) {
-						f.photos.push( { id: img.attachment_id, thumb: img.thumb, caption: '', hint: 'unknown' } );
-						added++;
-					}
-				} );
 				saveForm();
-				state.importResult = '取り込みました：項目 ' + n + ' 件・写真 ' + added + ' 枚' + ( r.title ? '（元のタイトル：' + r.title + '）' : '' ) + '。内容を確認・修正してから作成してください。' +
-					( staffSet ? ' 担当スタッフのコメントも見つかりました（担当スタッフ 1 の欄に入れました。スタッフを選んでください）。' : '' ) +
+				var head = '項目 ' + n + ' 件を取り込みました' + ( r.title ? '（元のタイトル：' + r.title + '）' : '' ) + '。';
+				var tail = ( staffSet ? ' 担当スタッフのコメントも見つかりました（担当スタッフ 1 の欄に入れました。スタッフを選んでください）。' : '' ) +
+					( r.photos_skipped ? ' ロゴ・バナーなどと判断した画像 ' + r.photos_skipped + ' 枚は入れていません。' : '' ) +
 					( r.cost ? ' AIの費用（推定・管理者にだけ表示）：' + costLine( r.cost.last, r.cost.jpy_per_usd ) : '' );
+				return importPhotos( f, r.photos || [], head, tail );
 			} );
 		} );
+	}
+	// ページの写真を、ページの順に写真の一覧へ入れる。このサイトのメディアにないものは1枚ずつ取り込む。
+	function importPhotos( f, photos, head, tail ) {
+		var added = 0;
+		var failed = [];
+		var done = 0;
+		function push( id, thumb, p ) {
+			if ( f.photos.some( function ( x ) { return x.id === id; } ) ) {
+				return;
+			}
+			f.photos.push( { id: id, thumb: thumb, caption: p.caption || '', hint: p.phase || 'unknown' } );
+			added++;
+		}
+		function show( running ) {
+			state.importResult = head + ' 写真 ' + added + ' 枚を一覧に入れました' + ( running ? '（取り込み中 ' + done + ' / ' + photos.length + '）' : '' ) + '。' +
+				( failed.length ? ' 取り込めなかった写真 ' + failed.length + ' 枚：' + failed.join( '、' ) + '。' : '' ) +
+				( running ? '' : ' 内容・写真の工程を確認・修正してから作成してください。' ) + tail;
+			saveForm();
+			render();
+		}
+		return photos.reduce( function ( chain, p ) {
+			return chain.then( function () {
+				if ( p.attachment_id ) {
+					push( p.attachment_id, p.thumb, p );
+					done++;
+					return;
+				}
+				if ( ! p.url ) {
+					failed.push( '写真' + p.no + '（アドレスが分かりません）' );
+					done++;
+					return;
+				}
+				show( true );
+				return api( 'import/media', 'POST', { url: p.url, title: p.caption || p.alt || '' } ).then( function ( m ) {
+					push( m.attachment_id, m.thumb, p );
+				} ).catch( function ( e ) {
+					failed.push( '写真' + p.no + '（' + ( ( e.fields && e.fields[ 0 ] ) || ( e.error && e.error.message ) || '失敗' ) + '）' );
+				} ).then( function () { done++; } );
+			} );
+		}, Promise.resolve() ).then( function () { show( false ); } );
 	}
 
 	function move( arr, i, d ) {

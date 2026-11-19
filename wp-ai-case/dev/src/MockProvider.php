@@ -181,7 +181,23 @@ final class MockProvider implements ProviderInterface {
 		return ProviderResult::success(
 			200,
 			array(
-				'content' => array( 'title' => '【模擬】取り込んだ事例', 'facts' => $facts, 'staff_comment' => '' ),
+				'content' => array(
+					'title'         => '【模擬】取り込んだ事例',
+					'facts'         => $facts,
+					'staff_comment' => '',
+					// 写真の印 [写真n] ごとに：代替テキストに「ロゴ」を含むものは使わない、「施工後」なら工程を after に。
+					'photos'        => array_values(
+						array_map(
+							static fn( $m ) => array(
+								'no'      => (int) $m[1],
+								'use'     => ! str_contains( (string) ( $m[2] ?? '' ), 'ロゴ' ),
+								'phase'   => str_contains( (string) ( $m[2] ?? '' ), '施工後' ) ? 'after' : ( str_contains( (string) ( $m[2] ?? '' ), '施工前' ) ? 'before' : 'unknown' ),
+								'caption' => str_contains( (string) ( $m[2] ?? '' ), '施工後' ) ? '施工後' : '',
+							),
+							preg_match_all( '/\[写真(\d+)\](?:（([^）]*)）)?/u', $text, $mm, PREG_SET_ORDER ) ? array_values( array_column( array_map( static fn( $x ) => array( $x[1], $x ), $mm ), 1, 0 ) ) : array()
+						)
+					),
+				),
 				'usage'   => array( 'input_tokens' => 800, 'output_tokens' => 150 ),
 			)
 		);

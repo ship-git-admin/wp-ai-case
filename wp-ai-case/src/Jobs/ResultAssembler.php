@@ -55,7 +55,7 @@ final class ResultAssembler {
 				'original_position' => (int) $img['original_position'],
 				'phase'             => $phase,
 				'description'       => self::text( (string) ( $a['description'] ?? '' ), 500 ),
-				'caption'           => '' !== $img['caption'] ? $img['caption'] : self::line( (string) ( $a['caption'] ?? '' ), 40 ),
+				'caption'           => '' !== $img['caption'] ? $img['caption'] : self::caption( (string) ( $a['caption'] ?? '' ) ),
 				'related_image_ids' => $rel,
 				'included'          => true,
 				'uncertain'         => (bool) ( $a['uncertain'] ?? false ) && 'unknown' === $img['user_phase_hint'],
@@ -173,6 +173,25 @@ final class ResultAssembler {
 	public static function categories( array $article, array $offered ): array {
 		$ids = array_values( array_unique( array_map( 'intval', (array) ( $article['category_ids'] ?? array() ) ) ) );
 		return array_slice( array_values( array_intersect( $ids, $offered ) ), 0, 3 );
+	}
+
+	/**
+	 * AI・取り込みのキャプション：工程の名前（テーマが見出しとして出す）を除き、残りが「写真」「様子」だけなら空にする。最大40文字。
+	 */
+	public static function caption( string $v ): string {
+		$phase = '(?:施工前|施工中|施工後|工事前|工事中|工事後|施工完了|完成|ビフォー|アフター|before|after)';
+		$sep   = '[\s　の：:・\-－―／\/|｜（）()\[\]【】「」]*';
+		$v     = self::line( $v, 100 );
+		$v     = (string) preg_replace( '/^' . $sep . $phase . $sep . '/iu', '', $v );
+		$v     = (string) preg_replace( '/' . $sep . $phase . $sep . '$/iu', '', $v );
+		$v     = (string) preg_replace( '/^[\s　・：:／\/|｜\-]+|[\s　・：:／\/|｜\-]+$/u', '', $v ); // trim() は文字単位でないので使わない
+		if ( preg_match( '/^(?:の)?(?:写真|画像|表示画像|様子|状態|状況|全景|イメージ|image|photo)?$/iu', $v ) ) {
+			return '';
+		}
+		if ( preg_match( '/(?:。|ました|ます|でした|です)$/u', $v ) ) {
+			return ''; // 文は見出しにしない（本文の文章を写したもの）
+		}
+		return mb_substr( $v, 0, 40 );
 	}
 
 	public static function line( string $v, int $max ): string {

@@ -186,7 +186,7 @@ final class PatchApplier {
 							}
 						}
 					} elseif ( 'image_caption_set' === $name ) {
-						$doc['images'][ $k ]['caption'] = ResultAssembler::line( (string) ( $op['caption'] ?? '' ), 100 );
+						$doc['images'][ $k ]['caption'] = $from_ai ? ResultAssembler::caption( (string) ( $op['caption'] ?? '' ) ) : ResultAssembler::line( (string) ( $op['caption'] ?? '' ), 100 );
 					} elseif ( 'image_phase_set' === $name ) {
 						$phase = (string) ( $op['phase'] ?? '' );
 						if ( ! in_array( $phase, array( 'before', 'during', 'after', 'unknown' ), true ) ) {

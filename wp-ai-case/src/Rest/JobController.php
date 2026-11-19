@@ -29,6 +29,7 @@ final class JobController {
 		register_rest_route( RestController::NS, '/jobs', array( 'methods' => 'POST', 'callback' => array( self::class, 'create' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/drafts', array( 'methods' => 'GET', 'callback' => array( self::class, 'drafts' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/import', array( 'methods' => 'POST', 'callback' => array( self::class, 'import' ), 'permission_callback' => $perm ) );
+		register_rest_route( RestController::NS, '/import/media', array( 'methods' => 'POST', 'callback' => array( self::class, 'import_media' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs/' . self::UUID, array( 'methods' => 'GET', 'callback' => array( self::class, 'show' ), 'permission_callback' => $perm ) );
 		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save', 'meta' ) as $action ) {
 			register_rest_route( RestController::NS, '/jobs/' . self::UUID . '/' . $action, array( 'methods' => 'POST', 'callback' => array( self::class, $action ), 'permission_callback' => $perm ) );
@@ -86,6 +87,19 @@ final class JobController {
 	public static function import( \WP_REST_Request $r ) {
 		try {
 			return new \WP_REST_Response( ( new JobService() )->import( (array) $r->get_json_params(), get_current_user_id() ) );
+		} catch ( JobError $e ) {
+			return new \WP_Error( 'wpaic_error', $e->response['message'] ?? '', array( 'status' => $e->status, 'error' => $e->response ) + $e->extra );
+		}
+	}
+
+	/**
+	 * 取り込みで見つけたページの画像を1枚、メディアに取り込む。
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function import_media( \WP_REST_Request $r ) {
+		try {
+			return new \WP_REST_Response( ( new JobService() )->import_media( (array) $r->get_json_params(), get_current_user_id() ) );
 		} catch ( JobError $e ) {
 			return new \WP_Error( 'wpaic_error', $e->response['message'] ?? '', array( 'status' => $e->status, 'error' => $e->response ) + $e->extra );
 		}
