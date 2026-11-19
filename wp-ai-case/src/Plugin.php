@@ -16,6 +16,14 @@ final class Plugin {
 
 	public const POST_TYPE = 'works';
 
+	/** 施工事例カテゴリのタクソノミー（ACF の適用条件には使われていない）。 */
+	public const CATEGORY_TAXONOMY = 'works_cat';
+
+	public static function category_taxonomy(): string {
+		$tax = (string) apply_filters( 'wp_ai_case_category_taxonomy', self::CATEGORY_TAXONOMY );
+		return taxonomy_exists( $tax ) && is_object_in_taxonomy( self::POST_TYPE, $tax ) ? $tax : '';
+	}
+
 	public static function boot(): void {
 		if ( ! self::acf_pro_available() ) {
 			add_action( 'admin_notices', array( self::class, 'notice_acf_missing' ) );

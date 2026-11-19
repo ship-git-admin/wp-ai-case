@@ -15,6 +15,10 @@
  * 新規作成枠：作成の開始時に予約し、新しい下書きの保存成功で確定、取消し・期限切れで戻す（QuotaService）。
  * 費用：外部呼び出しの前に推定費用で上限を確かめ（超えるなら呼ばない・AI-014）、呼んだ後に使用量を記録する（CostGuard）。
  *
+ * 施工事例カテゴリ・アイキャッチ（data.meta）は版の履歴とは別に持ち、保存のときに下書きへ設定する。
+ * カテゴリは入力で選んだもの、なければ AI が候補から選んだもの。アイキャッチは施工後の1枚目（なければ最初の写真）。
+ * 既存ページからの取り込み（import）は、貼り付けた文章から項目を取り出すだけで、下書きは作らない（新規作成枠を使わない）。
+ *
  * @package WpAiCase
  */
 
@@ -224,6 +228,8 @@ final class JobService {
 					'post_modified_gmt' => (string) $post->post_modified_gmt,
 					'doc_version'       => $base,
 				),
+				'meta'      => self::post_meta_values( $post_id ),
+				'meta_open' => self::post_meta_values( $post_id ),
 				'target'    => array(
 					'title'         => html_entity_decode( get_the_title( $post ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 					'edited'        => DraftState::labels( $edited ),
@@ -382,6 +388,12 @@ final class JobService {
 				$doc      = ResultAssembler::build( $data['input'], $analysis, (array) ( $content['article'] ?? array() ), $job_id );
 				$data['versions']  = array( $doc );
 				$data['index']     = 0;
+				$chosen            = array_values( array_map( 'intval', (array) ( $data['input']['terms'] ?? array() ) ) );
+				$data['meta']      = array(
+					'terms'        => $chosen ? $chosen : ResultAssembler::categories( (array) ( $content['article'] ?? array() ), array_column( self::categories(), 'id' ) ),
+					'terms_source' => $chosen ? 'user' : 'ai',
+					'thumbnail_id' => self::default_thumbnail( $doc ),
+				);
 				$data['questions'] = array_slice( array_values( array_filter( array_map( static fn( $q ) => ResultAssembler::line( (string) $q, 200 ), (array) ( $content['questions'] ?? array() ) ) ) ), 0, 10 );
 				return $this->repo->compare_and_set( $fresh, array( 'status' => 'proposal_ready', 'data' => $data, 'lease_until' => null ) );
 			}
@@ -483,6 +495,7 @@ final class JobService {
 			'document'         => $doc,
 			'allowed_sections' => $allowed,
 			'instruction'      => $instruction,
+			'article_policy'   => (string) ( $job['data']['input']['article_policy'] ?? '' ),
 		);
 		try {
 			$this->cost->check( 'revise', CostGuard::estimate( Settings::model(), 0, strlen( (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) )['usd'] );
@@ -548,14 +561,16 @@ final class JobService {
 			if ( $revise ) {
 				$result = $this->save_revision( $data, $doc, $user, $mapping );
 			} else {
-				$result = ( new DraftWriter() )->create_from_document(
-					$doc,
-					$user,
-					array(
-						'mapping'    => $mapping,
-						'extra_meta' => array( self::META_JOB => $job_id ),
-					)
+				$options = array(
+					'mapping'    => $mapping,
+					'extra_meta' => array( self::META_JOB => $job_id ),
+					'thumbnail'  => (int) ( $data['meta']['thumbnail_id'] ?? 0 ),
 				);
+				$terms   = self::valid_terms( (array) ( $data['meta']['terms'] ?? array() ) );
+				if ( $terms ) {
+					$options['terms'] = array( Plugin::category_taxonomy() => $terms );
+				}
+				$result = ( new DraftWriter() )->create_from_document( $doc, $user, $options );
 				$inspector = new SchemaInspector();
 				DraftState::record( (int) $result['post_id'], $doc, $mapping, $inspector->groups( $inspector->context( Plugin::POST_TYPE, (int) $result['post_id'] ) ), 1, $user );
 			}
@@ -595,10 +610,13 @@ final class JobService {
 			DraftState::release( $post_id, $from );
 			throw $e;
 		}
+		$meta = $this->apply_meta( $post_id, $data, $doc );
 		if ( ! $result['changed_slots'] ) {
 			DraftState::release( $post_id, $from );
+			$result['changed_slots'] = $meta;
 			return $result;
 		}
+		$result['changed_slots'] = array_merge( $result['changed_slots'], $meta );
 		$inspector = new SchemaInspector();
 		DraftState::record( $post_id, $doc, $mapping, $inspector->groups( $inspector->context( Plugin::POST_TYPE, $post_id ) ), $from + 1, $user );
 		return $result;
@@ -645,7 +663,287 @@ final class JobService {
 			'preview_url'     => $post ? (string) get_preview_post_link( $post ) : null,
 			'expires_at'      => $job['expires_at'],
 			'cost'            => self::cost_view( $data, $user ),
+			'meta'            => $data['meta'] ?? null,
 		);
+	}
+
+	/**
+	 * 施工事例カテゴリ・アイキャッチを変える（版は増やさない。保存のときに下書きへ設定する）。
+	 *
+	 * @param array<string,mixed> $in terms（ターム ID の配列）, thumbnail_id（下書きに含める写真。0 で設定しない）
+	 * @return array<string,mixed>
+	 */
+	public function set_meta( string $job_id, int $user, int $base_index, array $in ): array {
+		$job    = $this->editable( $job_id, $user, $base_index );
+		$data   = $job['data'];
+		$errors = array();
+		$meta   = (array) ( $data['meta'] ?? array() );
+		if ( array_key_exists( 'terms', $in ) ) {
+			$meta['terms']        = CaseInputValidator::terms( $in['terms'], $errors );
+			$meta['terms_source'] = 'user';
+		}
+		if ( array_key_exists( 'thumbnail_id', $in ) ) {
+			$thumb    = (int) $in['thumbnail_id'];
+			$included = array_map( static fn( $i ) => (int) $i['attachment_id'], array_filter( $data['versions'][ $base_index ]['images'], static fn( $i ) => ! empty( $i['included'] ) ) );
+			if ( 0 !== $thumb && ! in_array( $thumb, $included, true ) ) {
+				$errors[] = 'thumbnail_id';
+			}
+			$meta['thumbnail_id'] = $thumb;
+		}
+		if ( $errors ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'meta_invalid', array( 'job_id' => $job_id ) ), 400, array( 'fields' => array_values( array_unique( $errors ) ) ) );
+		}
+		$data['meta'] = $meta;
+		return $this->repo->compare_and_set( $job, array( 'data' => $data ) );
+	}
+
+	/**
+	 * 既存ページの文章（HTML でもよい）から、入力欄の値を取り出す。下書きは作らない。
+	 * 写真は、ページの img が このサイトのメディアにあるものだけを返す（外部通信なし・自分が編集できる画像だけ）。
+	 *
+	 * @param array<string,mixed> $raw html（貼り付けた文章）, consent_external_ai
+	 * @return array<string,mixed>
+	 */
+	public function import( array $raw, int $user ): array {
+		$pre = PreflightService::check( $user, true );
+		if ( ! $pre['ok'] ) {
+			throw new JobError( $pre['error'], 'AI-015' === $pre['code'] ? 403 : 503 );
+		}
+		if ( true !== ( $raw['consent_external_ai'] ?? null ) ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'import_consent_missing' ), 400, array( 'fields' => array( 'consent_external_ai' ) ) );
+		}
+		$html = is_string( $raw['html'] ?? null ) ? $raw['html'] : '';
+		$text = self::page_text( $html );
+		if ( mb_strlen( $text ) < 10 ) {
+			throw new JobError( SafeErrorPresenter::present( 'AI-017', 'customer', 'import_empty' ), 400, array( 'fields' => array( '貼り付けた内容から文章を読み取れませんでした' ) ) );
+		}
+		$payload = array(
+			'model' => Settings::model(),
+			'text'  => $text,
+		);
+		try {
+			$this->cost->check( 'import', CostGuard::estimate( Settings::model(), 0, strlen( (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) )['usd'] );
+		} catch ( CaseError $e ) {
+			throw JobError::from_case( $e, 'cost_guard', 429 );
+		}
+		$result = $this->provider()->extract( $payload );
+		$usd    = $this->cost->record( 'import', Settings::model(), null, 0, (array) ( $result->data['usage'] ?? array() ), $result->ok ? 'ok' : (string) ( $result->error_type ?? 'error' ) );
+		$entry  = self::cost_entry( 'import', $usd, $result );
+		$cost   = Settings::show_cost( $user ) ? array( 'last' => $entry, 'total_usd' => $entry['usd'], 'calls' => 1, 'jpy_per_usd' => Settings::jpy_per_usd() ) : null;
+		if ( ! $result->ok ) {
+			$class = ErrorClassifier::from_provider( $result ) ?? array( 'code' => 'AI-018', 'http_class' => 'unknown' );
+			throw new JobError( SafeErrorPresenter::present( $class['code'], 'customer', 'import_provider_error', array( 'provider_error_type' => (string) $result->error_type ), $class['http_class'] ), 502, $cost ? array( 'cost' => $cost ) : array() );
+		}
+		$content = (array) ( $result->data['content'] ?? array() );
+		$facts   = array();
+		foreach ( \WpAiCase\AI\Prompts::EXTRACT_FACTS as $f ) {
+			$v = 'area' === $f ? ResultAssembler::line( (string) ( $content['facts'][ $f ] ?? '' ), 100 ) : ResultAssembler::text( (string) ( $content['facts'][ $f ] ?? '' ), CaseInputValidator::MAX_TEXT );
+			if ( '' !== $v ) {
+				$facts[ $f ] = $v;
+			}
+		}
+		return array(
+			'title'         => ResultAssembler::line( (string) ( $content['title'] ?? '' ), 120 ),
+			'facts'         => $facts,
+			'staff_comment' => ResultAssembler::text( (string) ( $content['staff_comment'] ?? '' ), 600 ),
+			'images'        => self::page_images( $html, $user ),
+			'cost'          => $cost,
+		);
+	}
+
+	/**
+	 * 貼り付けた HTML（または文章）を、改行を残した文章にする（最大 2万字）。
+	 */
+	public static function page_text( string $html ): string {
+		$h = (string) preg_replace( '#<(script|style|noscript|template|svg|iframe)\b[^>]*>.*?</\1\s*>#is', ' ', $html );
+		$h = (string) preg_replace( '#<!--.*?-->#s', ' ', $h );
+		$h = (string) preg_replace( '#<br\s*/?>#i', "\n", $h );
+		$h = (string) preg_replace( '#</(p|div|li|tr|h[1-6]|dt|dd|section|article|table|ul|ol|figure|figcaption|blockquote|header|footer|main|aside)\s*>#i', "\n", $h );
+		$h = (string) preg_replace( '#<(td|th|dt|dd)\b[^>]*>#i', ' ', $h );
+		$t = wp_strip_all_tags( $h, false );
+		$t = html_entity_decode( $t, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		$lines = array();
+		foreach ( preg_split( '/\R/u', $t ) ?: array() as $line ) {
+			$line = trim( (string) preg_replace( '/[\h\x{3000}]+/u', ' ', $line ) );
+			if ( '' !== $line ) {
+				$lines[] = $line;
+			}
+		}
+		return mb_substr( implode( "\n", $lines ), 0, 20000 );
+	}
+
+	/**
+	 * 貼り付けた HTML の img のうち、このサイトのメディアにある画像（ページの順・重複なし・最大200枚）。
+	 * 別のドメインの URL でも、アップロード先のパス（/wp-content/uploads/ 以降）が同じなら同じ画像とみなす。
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function page_images( string $html, int $user ): array {
+		global $wpdb;
+		if ( ! preg_match_all( '#<img\b[^>]*>#i', $html, $tags ) ) {
+			return array();
+		}
+		$out  = array();
+		$seen = array();
+		foreach ( $tags[0] as $tag ) {
+			$src = '';
+			foreach ( array( 'data-src', 'src' ) as $attr ) {
+				if ( preg_match( '#\s' . $attr . '\s*=\s*(["\'])(.*?)\1#i', $tag, $m ) && '' !== trim( $m[2] ) && ! str_starts_with( trim( $m[2] ), 'data:' ) ) {
+					$src = html_entity_decode( trim( $m[2] ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+					break;
+				}
+			}
+			$path = (string) wp_parse_url( $src, PHP_URL_PATH );
+			$pos  = strpos( $path, '/uploads/' );
+			if ( false === $pos ) {
+				continue;
+			}
+			$file = rawurldecode( substr( $path, $pos + 9 ) );
+			$id   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s LIMIT 1", $file ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			if ( ! $id ) {
+				// 縮小版（-300x200）・WebP に変換した URL（.webp / .jpg.webp）・大きい画像の -scaled は、元のファイル名に戻して探す。
+				$base = (string) preg_replace( '/\.webp$/i', '', $file );
+				$base = (string) preg_replace( '/\.(jpe?g|png|gif|webp|avif)$/i', '', $base );
+				$base = (string) preg_replace( '/-(\d+x\d+|scaled)$/i', '', $base );
+				$id   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND ( meta_value LIKE %s OR meta_value LIKE %s ) ORDER BY post_id LIMIT 1", $wpdb->esc_like( $base ) . '.%', $wpdb->esc_like( $base ) . '-scaled.%' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			}
+			if ( ! $id || isset( $seen[ $id ] ) || ! wp_attachment_is_image( $id ) || ! user_can( $user, 'edit_post', $id ) ) {
+				continue;
+			}
+			$seen[ $id ] = true;
+			$alt         = preg_match( '#\salt\s*=\s*(["\'])(.*?)\1#i', $tag, $m ) ? ResultAssembler::line( html_entity_decode( $m[2], ENT_QUOTES | ENT_HTML5, 'UTF-8' ), 40 ) : '';
+			$out[]       = array(
+				'attachment_id' => $id,
+				'thumb'         => (string) wp_get_attachment_image_url( $id, 'thumbnail' ),
+				'alt'           => $alt,
+			);
+			if ( count( $out ) >= CaseInputValidator::MAX_IMAGES ) {
+				break;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * 施工事例カテゴリの候補（AI に渡す一覧・画面の選択肢）。最大100件。
+	 * 子を持つターム（「エリアから選ぶ」などの分類の見出し）は選択肢にせず、子の group に名前を入れる。
+	 *
+	 * @return array<int,array{id:int,name:string,group:string}>
+	 */
+	public static function categories(): array {
+		$tax = Plugin::category_taxonomy();
+		if ( '' === $tax ) {
+			return array();
+		}
+		$terms = get_terms(
+			array(
+				'taxonomy'   => $tax,
+				'hide_empty' => false,
+				'number'     => 100,
+				'orderby'    => 'term_order',
+			)
+		);
+		if ( is_wp_error( $terms ) ) {
+			return array();
+		}
+		$names   = array();
+		$parents = array();
+		foreach ( $terms as $t ) {
+			$names[ (int) $t->term_id ] = html_entity_decode( (string) $t->name, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			$parents[ (int) $t->parent ] = true;
+		}
+		$out = array();
+		foreach ( $terms as $t ) {
+			if ( isset( $parents[ (int) $t->term_id ] ) ) {
+				continue;
+			}
+			$out[] = array(
+				'id'    => (int) $t->term_id,
+				'name'  => $names[ (int) $t->term_id ],
+				'group' => (int) $t->parent ? (string) ( $names[ (int) $t->parent ] ?? '' ) : '',
+			);
+		}
+		usort( $out, static fn( $a, $b ) => strcmp( $a['group'], $b['group'] ) );
+		return $out;
+	}
+
+	/**
+	 * アイキャッチの初期値：施工後の1枚目（元の並び順）、なければ最初の写真。
+	 *
+	 * @param array<string,mixed> $doc
+	 */
+	public static function default_thumbnail( array $doc ): int {
+		$images = array_values( array_filter( (array) $doc['images'], static fn( $i ) => ! empty( $i['included'] ) ) );
+		usort( $images, static fn( $a, $b ) => $a['original_position'] <=> $b['original_position'] );
+		foreach ( $images as $image ) {
+			if ( 'after' === $image['phase'] ) {
+				return (int) $image['attachment_id'];
+			}
+		}
+		return $images ? (int) $images[0]['attachment_id'] : 0;
+	}
+
+	/**
+	 * いまある（削除されていない）カテゴリだけ。
+	 *
+	 * @param array<int,mixed> $ids
+	 * @return int[]
+	 */
+	private static function valid_terms( array $ids ): array {
+		$tax = Plugin::category_taxonomy();
+		if ( '' === $tax ) {
+			return array();
+		}
+		return array_values( array_filter( array_unique( array_map( 'intval', $ids ) ), static fn( $id ) => $id > 0 && term_exists( $id, $tax ) ) );
+	}
+
+	/**
+	 * 下書きの今のカテゴリ・アイキャッチ。
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function post_meta_values( int $post_id ): array {
+		$tax   = Plugin::category_taxonomy();
+		$terms = '' !== $tax ? wp_get_post_terms( $post_id, $tax, array( 'fields' => 'ids' ) ) : array();
+		$terms = is_wp_error( $terms ) ? array() : array_map( 'intval', $terms );
+		sort( $terms );
+		return array(
+			'terms'        => $terms,
+			'terms_source' => 'post',
+			'thumbnail_id' => (int) get_post_thumbnail_id( $post_id ),
+		);
+	}
+
+	/**
+	 * 既存の下書きの修正：画面で変えたカテゴリ・アイキャッチだけを設定する（開いた後に変えていなければ触らない）。
+	 *
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $doc
+	 * @return string[] 変えた部分（DraftState::SLOT_LABELS の名前）
+	 */
+	private function apply_meta( int $post_id, array $data, array $doc ): array {
+		$now     = (array) ( $data['meta'] ?? array() );
+		$open    = (array) ( $data['meta_open'] ?? array() );
+		$changed = array();
+		$tax     = Plugin::category_taxonomy();
+		$terms   = self::valid_terms( (array) ( $now['terms'] ?? array() ) );
+		sort( $terms );
+		if ( '' !== $tax && array_key_exists( 'terms', $now ) && $terms !== (array) ( $open['terms'] ?? array() ) ) {
+			wp_set_object_terms( $post_id, $terms, $tax, false );
+			$changed[] = DraftState::TERMS_SLOT;
+		}
+		$thumb    = (int) ( $now['thumbnail_id'] ?? 0 );
+		$included = array_map( static fn( $i ) => (int) $i['attachment_id'], array_filter( $doc['images'], static fn( $i ) => ! empty( $i['included'] ) ) );
+		if ( array_key_exists( 'thumbnail_id', $now ) && $thumb !== (int) ( $open['thumbnail_id'] ?? 0 ) ) {
+			if ( $thumb > 0 && in_array( $thumb, $included, true ) && wp_attachment_is_image( $thumb ) ) {
+				set_post_thumbnail( $post_id, $thumb );
+				$changed[] = DraftState::THUMB_SLOT;
+			} elseif ( 0 === $thumb ) {
+				delete_post_thumbnail( $post_id );
+				$changed[] = DraftState::THUMB_SLOT;
+			}
+		}
+		return $changed;
 	}
 
 	/**
@@ -697,6 +995,9 @@ final class JobService {
 			'mode'                  => $mode,
 			'facts'                 => $data['input']['primary_facts'],
 			'photo_set_description' => $data['input']['photo_set_description'],
+			'article_policy'        => (string) ( $data['input']['article_policy'] ?? '' ),
+			'categories'            => (array) ( $data['input']['terms'] ?? array() ) ? array() : self::categories(),
+			'staff_comment_needed'  => array_values( array_map( static fn( $i ) => $i + 1, array_keys( array_filter( array_values( (array) ( $data['input']['relations']['staff'] ?? array() ) ), static fn( $s ) => '' === (string) $s['comment'] ) ) ) ),
 			'images'                => $list,
 			'prior_analysis'        => 'compose_text_only' === $mode ? $data['analysis'] : null,
 		);

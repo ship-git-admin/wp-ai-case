@@ -48,6 +48,7 @@
         "initial_proposal",
         "schema_drift",
         "compatible_update",
+        "template_update",
         "rebuild_proposed",
         "local_validation",
         "staging_validation_requested",

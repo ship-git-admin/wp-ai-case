@@ -106,6 +106,19 @@ final class OpenAIProvider implements ProviderInterface {
 		return $this->respond( Prompts::SYSTEM_REVISE, $content, 'case_revision', Prompts::revise_schema( (array) ( $payload['document'] ?? array() ), array_values( (array) ( $payload['allowed_sections'] ?? array() ) ) ) ?? Prompts::revise_schema(), (string) $payload['model'], 90 );
 	}
 
+	public function extract( array $payload ): ProviderResult {
+		if ( null === $this->client ) {
+			return ProviderResult::unavailable();
+		}
+		$content = array(
+			array(
+				'type' => 'input_text',
+				'text' => Prompts::extract_text( $payload ),
+			),
+		);
+		return $this->respond( Prompts::SYSTEM_EXTRACT, $content, 'case_import', Prompts::extract_schema(), (string) $payload['model'], 90 );
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>> $content
 	 * @param array<string,mixed>            $schema

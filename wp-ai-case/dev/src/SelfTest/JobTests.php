@@ -113,15 +113,16 @@ final class JobTests {
 		$t = $this->t;
 		$state = array();
 
-		$t->test( 'J-01', 'C1-UI01 必須の一次情報・写真一式の説明・写真・同意が欠けたら AI-017、ジョブ0・外部0', function () use ( $images ) {
+		$t->test( 'J-01', 'C1-UI01 必須の一次情報・写真・同意が欠けたら AI-017、ジョブ0・外部0（写真一式の説明は任意）', function () use ( $images ) {
 			Settings::$test_status = 'configured';
 			MockProvider::$calls   = 0;
 			$s = $this->service();
 			$e = $this->err( fn() => $s->create( $this->input( $images, array( 'primary_facts' => array( 'overview' => '' ), 'consent_external_ai' => false, 'photo_set_description' => '' ) ), $this->user ) );
 			$this->t->same( 'AI-017', $e->response['error_code'], 'コード' );
-			foreach ( array( 'primary_facts.overview', 'photo_set_description', 'consent_external_ai' ) as $f ) {
+			foreach ( array( 'primary_facts.overview', 'consent_external_ai' ) as $f ) {
 				$this->t->true( in_array( $f, $e->extra['fields'] ?? array(), true ), "不足項目 {$f}" );
 			}
+			$this->t->true( ! in_array( 'photo_set_description', $e->extra['fields'] ?? array(), true ), '写真一式の説明は任意' );
 			$in           = $this->input( $images );
 			$in['images'] = array();
 			$this->t->same( 'AI-017', $this->err( fn() => $s->create( $in, $this->user ) )->response['error_code'], '写真0枚' );
@@ -155,12 +156,15 @@ final class JobTests {
 			$doc = $job['data']['versions'][0];
 			$ids = array_map( static fn( $i ) => $i['attachment_id'], $in['images'] );
 			$this->t->same( $ids, array_map( static fn( $i ) => $i['attachment_id'], $doc['images'] ), '写真の集合と順番' );
-			$this->t->same( array( 'overview', 'client_request', 'work_done', 'area' ), array_keys( $doc['facts'] ), '事実は入力された項目だけ' );
+			$this->t->same( array( 'overview', 'client_request', 'work_done', 'area' ), array_keys( array_filter( $doc['facts'], static fn( $f ) => 'user_input' === $f['source'] ) ), '事実は入力された項目だけ' );
+			$this->t->same( array( 'work_type' ), array_keys( array_filter( $doc['facts'], static fn( $f ) => 'user_input' !== $f['source'] ) ), 'AIの案は施工内容の一覧だけ（確認が必要な値）' );
+			$this->t->same( 'editor_review', $doc['facts']['work_type']['source'], '施工内容の一覧の出どころ' );
 			$this->t->true( ! isset( $doc['facts']['cost'] ) && ! isset( $doc['facts']['duration'] ), '費用・工期を推測で入れない' );
 			$this->t->same( 1, MockProvider::$calls, '外部呼び出しは1回' );
 			$p = MockProvider::$payloads[0];
 			$this->t->true( ! isset( $p['images'][0]['data'] ), 'Mock には画像データを渡さない（Claude のときだけ縮小コピーを作る）' );
-			$this->t->same( array(), array_values( array_diff( array_keys( $p ), array( 'model', 'mode', 'facts', 'photo_set_description', 'images', 'prior_analysis' ) ) ), '送る項目（関連付け・投稿IDなどを送らない）' );
+			$this->t->same( array(), array_values( array_diff( array_keys( $p ), array( 'model', 'mode', 'facts', 'photo_set_description', 'article_policy', 'categories', 'staff_comment_needed', 'images', 'prior_analysis' ) ) ), '送る項目（関連付け・投稿IDなどを送らない）' );
+			$this->t->same( array(), $p['staff_comment_needed'], 'コメントが入力済みの担当スタッフは、AIに頼まない' );
 			$this->t->same( 'claude-haiku-5-5', $p['model'], 'モデル' );
 			$this->t->true( ! empty( $job['data']['questions'] ), 'AIからの確認事項' );
 			$state['job'] = $job;
@@ -407,7 +411,7 @@ final class JobTests {
 				$this->t->same( array( 'base64', 'image/jpeg', false ), array( $imgs[0]['source']['type'], $imgs[0]['source']['media_type'], ImagePreparer::has_metadata( $tmp ) ), '画像ブロック' );
 				wp_delete_file( $tmp );
 				$json = (string) wp_json_encode( $b );
-				foreach ( array( 'relations', 'customer_voice', 'post_id', 'wp-content', 'uploads', home_url() ) as $bad ) {
+				foreach ( array( 'relations', 'customer_voice_post_ids', 'post_id', 'wp-content', 'uploads', home_url() ) as $bad ) {
 					$this->t->true( ! str_contains( $json, $bad ), "送信内容に {$bad}" );
 				}
 				$mode = 'refusal';
@@ -512,7 +516,7 @@ final class JobTests {
 				$this->t->same( false, ImagePreparer::has_metadata( $tmp ), '位置情報などのメタデータなし' );
 				wp_delete_file( $tmp );
 				$json = (string) wp_json_encode( $b );
-				foreach ( array( 'relations', 'customer_voice', 'post_id', 'wp-content', 'uploads', home_url() ) as $bad ) {
+				foreach ( array( 'relations', 'customer_voice_post_ids', 'post_id', 'wp-content', 'uploads', home_url() ) as $bad ) {
 					$this->t->true( ! str_contains( $json, $bad ), "送信内容に {$bad}" );
 				}
 				$job = $s->revise_ai( $job['job_id'], $this->user, 0, array( 'title' ), '短くして' );
@@ -563,7 +567,7 @@ final class JobTests {
 					$check( $v, "{$path}|{$i}", $depth );
 				}
 			};
-			foreach ( array( 'compose' => \WpAiCase\AI\Prompts::compose_schema( true ), 'analyze' => \WpAiCase\AI\Prompts::compose_schema( false ), 'revise' => \WpAiCase\AI\Prompts::revise_schema() ) as $name => $schema ) {
+			foreach ( array( 'compose' => \WpAiCase\AI\Prompts::compose_schema( true ), 'analyze' => \WpAiCase\AI\Prompts::compose_schema( false ), 'revise' => \WpAiCase\AI\Prompts::revise_schema(), 'extract' => \WpAiCase\AI\Prompts::extract_schema() ) as $name => $schema ) {
 				if ( 'object' !== ( $schema['type'] ?? '' ) || isset( $schema['anyOf'] ) ) {
 					$errors[] = "{$name}: 最上位";
 				}

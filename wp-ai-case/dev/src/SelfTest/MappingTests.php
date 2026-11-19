@@ -110,7 +110,8 @@ final class MappingTests {
 			$fake   = static fn( $h ) => $h . '-selftest';
 			add_filter( 'wp_ai_case_theme_fingerprint', $fake );
 			try {
-				$this->t->same( 'recheck_required', $service->inspect( $context, 0, true )['display'], '再確認が必要' );
+				// テンプレートの更新で表示が未確認の版は、テーマに関係なく「テンプレート更新後の確認」のまま。
+				$this->t->same( 'template_update' === $before ? 'template_update' : 'recheck_required', $service->inspect( $context, 0, true )['display'], '再確認が必要' );
 				$new = $service->reconfirm_display( $service->gate( $context ), $context, $this->admin, 'selftest' );
 				$this->t->same( array( 'approved_active', 'verified' ), array( $new['status'], $service->inspect( $context, 0, true )['display'] ), '再確認後' );
 			} finally {

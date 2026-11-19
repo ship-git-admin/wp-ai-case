@@ -44,3 +44,14 @@
 .wpaic-draft p { margin: 0; }
 .wpaic-draft-notes { margin: 4px 0 0 1.2em; list-style: disc; color: #8a6100; font-size: 12px; }
 .wpaic-cost p { margin: 4px 0; }
+/* 既存ページの取り込み・カテゴリ・アイキャッチ（2026-11-19） */
+.wpaic-import { margin: 12px 0 20px; padding: 8px 12px; background: #f6f7f7; border: 1px solid #dcdcde; border-radius: 4px; }
+.wpaic-import summary { cursor: pointer; padding: 4px 0; }
+.wpaic-import textarea { font-size: 12px; }
+.wpaic-thumb-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.wpaic-thumb-pick label { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border: 2px solid transparent; border-radius: 4px; cursor: pointer; }
+.wpaic-thumb-pick label.is-selected { border-color: #2271b1; background: #f0f6fc; }
+.wpaic-thumb-pick img { object-fit: cover; border-radius: 3px; }
+.wpaic-cat-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 4px 0; }
+.wpaic-cat-label { min-width: 8em; color: #50575e; font-size: 12px; }
+.wpaic-cat-group .wpaic-checks { margin: 0; }

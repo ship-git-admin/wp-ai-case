@@ -57,6 +57,7 @@ final class MappingPage {
 		'unsupported'    => '未対応の型・構造',
 		'uncertain'      => '対応先が決められない',
 		'initial'        => '初回',
+		'template_update' => 'テンプレート（書き方）の更新',
 	);
 
 	public static function register(): void {
@@ -337,6 +338,7 @@ final class MappingPage {
 				array(
 					'verified'         => '確認済み',
 					'recheck_required' => 'テーマが変わったため、再確認が必要です（保存は続けられます）',
+					'template_update'  => 'テンプレートの更新で書き込む項目が増えたため、確認が必要です（保存は続けられます）',
 					'unverified'       => '未確認',
 				)[ $s['display'] ] ?? $s['display']
 			);
@@ -384,8 +386,8 @@ final class MappingPage {
 		}
 		echo '<ol class="wpaic-map-steps">';
 		foreach ( $steps as $i => [ $text, $done ] ) {
-			if ( 2 === $i && 'recheck_required' === $display ) {
-				printf( '<li class="is-recheck">%s</li>', esc_html( $text . '（テーマ変更後の再確認が必要）' ) );
+			if ( 2 === $i && in_array( $display, array( 'recheck_required', 'template_update' ), true ) ) {
+				printf( '<li class="is-recheck">%s</li>', esc_html( $text . ( 'template_update' === $display ? '（テンプレート更新後の確認が必要）' : '（テーマ変更後の再確認が必要）' ) ) );
 				continue;
 			}
 			printf( '<li class="%s">%s%s</li>', $done ? 'is-done' : '', esc_html( $text ), $done ? esc_html( '（済）' ) : '' );

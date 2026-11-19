@@ -6,6 +6,9 @@
  * - 写真は入力の集合と AI の解析の集合が完全に一致しなければ止める（不足・重複・架空のID）。
  * - 利用者が指定した工程・キャプションは AI より優先する。
  * - 文章はタグを除去し、長さを制限する。
+ * - ご要望・ご提案は、AI が入力だけからまとめた文章を節（node_id request / proposal）として持つ（空なら入力そのものを使う）。
+ * - 施工内容の短い一覧（work_type）は、入力がなければ AI の案を「確認が必要な値」（source editor_review）として入れる。
+ * - 担当スタッフのコメントは、入力が空のものだけ AI の案で埋める（入力があればそのまま）。お客様の声は入力だけ。
  *
  * @package WpAiCase
  */
@@ -52,7 +55,7 @@ final class ResultAssembler {
 				'original_position' => (int) $img['original_position'],
 				'phase'             => $phase,
 				'description'       => self::text( (string) ( $a['description'] ?? '' ), 500 ),
-				'caption'           => '' !== $img['caption'] ? $img['caption'] : self::line( (string) ( $a['caption'] ?? '' ), 100 ),
+				'caption'           => '' !== $img['caption'] ? $img['caption'] : self::line( (string) ( $a['caption'] ?? '' ), 40 ),
 				'related_image_ids' => $rel,
 				'included'          => true,
 				'uncertain'         => (bool) ( $a['uncertain'] ?? false ) && 'unknown' === $img['user_phase_hint'],
@@ -68,6 +71,15 @@ final class ResultAssembler {
 				'evidence_image_ids' => array(),
 			);
 		}
+		$work_type = self::line( (string) ( $article['work_type'] ?? '' ), 80 );
+		if ( ! isset( $facts['work_type'] ) && '' !== $work_type ) {
+			$facts['work_type'] = array(
+				'value'              => $work_type,
+				'status'             => 'provided',
+				'source'             => 'editor_review',
+				'evidence_image_ids' => array(),
+			);
+		}
 
 		$sections = array(
 			array(
@@ -79,6 +91,19 @@ final class ResultAssembler {
 				'evidence_image_ids' => array(),
 			),
 		);
+		foreach ( array( 'request' => 'request_text', 'proposal' => 'proposal_text' ) as $node => $key ) {
+			$body = self::text( (string) ( $article[ $key ] ?? '' ), 2000 );
+			if ( '' !== $body ) {
+				$sections[] = array(
+					'node_id'            => $node,
+					'kind'               => 'custom',
+					'heading'            => '',
+					'body'               => $body,
+					'image_ids'          => array(),
+					'evidence_image_ids' => array(),
+				);
+			}
+		}
 		foreach ( array_values( (array) ( $article['sections'] ?? array() ) ) as $n => $s ) {
 			if ( ! is_array( $s ) || ! in_array( $s['kind'] ?? '', self::KINDS, true ) ) {
 				continue;
@@ -105,6 +130,20 @@ final class ResultAssembler {
 			}
 		}
 
+		$relations = $input['relations'];
+		$drafted   = array();
+		foreach ( (array) ( $article['staff_comments'] ?? array() ) as $c ) {
+			if ( is_array( $c ) ) {
+				$drafted[ (int) ( $c['staff_no'] ?? 0 ) ] = self::text( (string) ( $c['comment'] ?? '' ), 600 );
+			}
+		}
+		// AI には投稿 ID を渡さず、担当スタッフの並び順（1から）で受け渡す。
+		foreach ( $relations['staff'] as $i => $staff ) {
+			if ( '' === $staff['comment'] && '' !== ( $drafted[ $i + 1 ] ?? '' ) ) {
+				$relations['staff'][ $i ]['comment'] = $drafted[ $i + 1 ];
+			}
+		}
+
 		$title = self::line( (string) ( $article['title'] ?? '' ), 120 );
 		$doc   = array(
 			'document_id'       => wp_generate_uuid4(),
@@ -118,10 +157,22 @@ final class ResultAssembler {
 			'layout_intent'     => array( 'hero' => 'auto' ),
 			'seo'               => $seo,
 			'status'            => 'proposal',
-			'relations'         => $input['relations'],
+			'relations'         => $relations,
 		);
 		( new CaseDocumentValidator() )->validate( $doc );
 		return $doc;
+	}
+
+	/**
+	 * AI が選んだ施工事例カテゴリのうち、候補に出したものだけ（最大3つ）。
+	 *
+	 * @param array<string,mixed> $article
+	 * @param int[]               $offered
+	 * @return int[]
+	 */
+	public static function categories( array $article, array $offered ): array {
+		$ids = array_values( array_unique( array_map( 'intval', (array) ( $article['category_ids'] ?? array() ) ) ) );
+		return array_slice( array_values( array_intersect( $ids, $offered ) ), 0, 3 );
 	}
 
 	public static function line( string $v, int $max ): string {

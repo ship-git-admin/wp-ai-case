@@ -2,7 +2,8 @@
 /**
  * 生成の依頼（契約 case_input、mode=create）の検証と正規化。
  *
- * - 必須の一次情報・写真一式の説明・写真1枚以上・外部送信への同意がそろわなければ AI-017（外部通信0）。
+ * - 必須の一次情報・写真1枚以上・外部送信への同意がそろわなければ AI-017（外部通信0）。写真一式の説明は任意（2026-11-19 依頼者の判断）。
+ * - 記事の方針（article_policy）は任意の文章。施工事例カテゴリは既存のタームだけ。
  * - 写真は自サイトのメディア（画像）だけ。重複不可。編集権限のない画像は使わない。
  * - 文章はタグを除去し、長さを制限する。
  *
@@ -19,7 +20,8 @@ final class CaseInputValidator {
 
 	public const MAX_TEXT   = 2000;
 	public const MAX_IMAGES = 200;
-	private const FACTS     = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes' );
+	private const FACTS     = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes', 'building_age', 'parts', 'work_type', 'customer_voice' );
+	public const MAX_POLICY = 1000;
 	private const REQUIRED  = array( 'overview', 'client_request', 'work_done' );
 	private const PHASES    = array( 'before', 'during', 'after', 'unknown' );
 
@@ -51,9 +53,8 @@ final class CaseInputValidator {
 			}
 		}
 		$set_desc = is_string( $in['photo_set_description'] ?? null ) ? self::text( $in['photo_set_description'] ) : '';
-		if ( '' === $set_desc ) {
-			$missing[] = 'photo_set_description';
-		}
+		$policy   = is_string( $in['article_policy'] ?? null ) ? mb_substr( trim( sanitize_textarea_field( $in['article_policy'] ) ), 0, self::MAX_POLICY ) : '';
+		$terms    = self::terms( $in['terms'] ?? array(), $errors );
 		if ( true !== ( $in['consent_external_ai'] ?? null ) ) {
 			$missing[] = 'consent_external_ai';
 		}
@@ -116,10 +117,35 @@ final class CaseInputValidator {
 			'post_type'             => 'works',
 			'primary_facts'         => $facts,
 			'photo_set_description' => $set_desc,
+			'article_policy'        => $policy,
+			'terms'                 => $terms,
 			'images'                => $images,
 			'consent_external_ai'   => true,
 			'relations'             => $relations,
 		);
+	}
+
+	/**
+	 * 施工事例カテゴリ（既存のタームの ID だけ）。
+	 *
+	 * @param string[] $errors
+	 * @return int[]
+	 */
+	public static function terms( mixed $ids, array &$errors ): array {
+		$tax = \WpAiCase\Plugin::category_taxonomy();
+		$out = array();
+		foreach ( is_array( $ids ) ? array_slice( $ids, 0, 10 ) : array() as $id ) {
+			$id = (int) $id;
+			if ( $id < 1 ) {
+				continue;
+			}
+			if ( '' === $tax || ! term_exists( $id, $tax ) ) {
+				$errors[] = 'terms';
+				continue;
+			}
+			$out[] = $id;
+		}
+		return array_values( array_unique( $out ) );
 	}
 
 	private static function text( string $v ): string {

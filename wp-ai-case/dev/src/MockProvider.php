@@ -123,6 +123,11 @@ final class MockProvider implements ProviderInterface {
 			'summary'  => '【模擬】入力された一次情報と写真をもとにした下書きです。',
 			'sections' => $sections,
 			'seo'      => array( 'title' => '【模擬】施工事例', 'description' => '【模擬】施工事例の説明', 'h1' => '【模擬】施工事例', 'keywords' => '模擬,施工事例' ),
+			'work_type'      => '【模擬】外壁塗装・付帯部塗装',
+			'request_text'   => '【模擬】ご要望をまとめた文章です。',
+			'proposal_text'  => '【模擬】ご提案をまとめた文章です。',
+			'staff_comments' => array_map( static fn( $no ) => array( 'staff_no' => (int) $no, 'comment' => '【模擬】担当スタッフのコメントです。' ), (array) ( $payload['staff_comment_needed'] ?? array() ) ),
+			'category_ids'   => array_slice( array_map( static fn( $c ) => (int) $c['id'], (array) ( $payload['categories'] ?? array() ) ), 0, 1 ),
 		);
 		$questions = isset( $facts['duration'] ) ? array() : array( '（模擬）工期はどのくらいでしたか？' );
 		return ProviderResult::success( 200, array( 'content' => array( 'images' => $out, 'article' => $article, 'questions' => $questions ), 'usage' => array( 'input_tokens' => 3000, 'output_tokens' => 800 ) ) );
@@ -155,5 +160,30 @@ final class MockProvider implements ProviderInterface {
 			$ops[] = array( 'op' => 'fact_set', 'section' => 'facts', 'fact_key' => 'cost', 'value' => '100万円', 'source' => 'user_input' );
 		}
 		return ProviderResult::success( 200, array( 'content' => array( 'operations' => $ops ), 'usage' => array( 'input_tokens' => 1500, 'output_tokens' => 200 ) ) );
+	}
+
+	public function extract( array $payload ): ProviderResult {
+		++self::$calls;
+		self::$payloads[] = $payload;
+		if ( ! in_array( $this->scenario, array( 'ok', 'bad_ids', 'evil' ), true ) ) {
+			return $this->probe( (string) $payload['model'] );
+		}
+		$facts = array_fill_keys( \WpAiCase\AI\Prompts::EXTRACT_FACTS, '' );
+		$text  = (string) ( $payload['text'] ?? '' );
+		$facts['overview']       = '【模擬】' . mb_substr( preg_replace( '/\s+/u', ' ', $text ), 0, 40 );
+		$facts['client_request'] = '【模擬】ご要望';
+		$facts['work_done']      = '【模擬】施工内容';
+		$facts['area']           = '模擬市';
+		if ( 'evil' === $this->scenario ) {
+			$facts['customer_voice'] = str_repeat( '長', 5000 );
+			$facts['area']           = '<script>x</script>模擬市';
+		}
+		return ProviderResult::success(
+			200,
+			array(
+				'content' => array( 'title' => '【模擬】取り込んだ事例', 'facts' => $facts, 'staff_comment' => '' ),
+				'usage'   => array( 'input_tokens' => 800, 'output_tokens' => 150 ),
+			)
+		);
 	}
 }

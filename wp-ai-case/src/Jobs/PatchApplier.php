@@ -19,7 +19,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class PatchApplier {
 
-	public const SECTIONS = array( 'title', 'body', 'concept', 'client_request', 'proposal', 'summary', 'facts', 'photos', 'before_after', 'layout', 'seo' );
+	public const SECTIONS = array( 'title', 'body', 'concept', 'client_request', 'proposal', 'summary', 'facts', 'photos', 'before_after', 'layout', 'seo', 'staff' );
 
 	/** 操作 => 許す section */
 	private const OPS = array(
@@ -33,10 +33,13 @@ final class PatchApplier {
 		'image_phase_set'      => array( 'before_after' ),
 		'image_relation_set'   => array( 'before_after' ),
 		'layout_set'           => array( 'layout' ),
+		'staff_comment_set'    => array( 'staff' ),
 	);
 
-	private const AI_OPS    = array( 'text_set', 'body_section_set', 'seo_set', 'image_caption_set', 'image_phase_set', 'layout_set' );
-	private const FACT_KEYS = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes', 'floor_plan', 'site_area' );
+	private const AI_OPS    = array( 'text_set', 'body_section_set', 'seo_set', 'image_caption_set', 'image_phase_set', 'layout_set', 'staff_comment_set' );
+	private const FACT_KEYS = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes', 'floor_plan', 'site_area', 'building_age', 'parts', 'work_type', 'customer_voice' );
+	/** 記事の文（お客様のご要望・ご提案）を入れるセクション。入力の事実（facts）とは別に持つ。 */
+	public const PROSE_NODES = array( 'client_request' => 'request', 'proposal' => 'proposal' );
 
 	/**
 	 * @param array<string,mixed>            $doc
@@ -84,9 +87,15 @@ final class PatchApplier {
 							break;
 						case 'client_request':
 						case 'proposal':
-							$key                           = 'client_request' === $section ? 'client_request' : 'work_done';
-							$doc['facts'][ $key ]['value'] = self::need( ResultAssembler::text( $value, 2000 ), $where );
-							$doc['facts'][ $key ]['source'] = $from_ai ? 'editor_review' : 'user_input';
+							// 記事の文があればそれを直す（入力の事実はそのまま残す）。なければ入力の事実を直す（以前の下書き）。
+							$prose = self::find( $doc, self::PROSE_NODES[ $section ] );
+							if ( null !== $prose ) {
+								$doc['sections'][ $prose ]['body'] = self::need( ResultAssembler::text( $value, 2000 ), $where );
+							} else {
+								$key                            = 'client_request' === $section ? 'client_request' : 'work_done';
+								$doc['facts'][ $key ]['value']  = self::need( ResultAssembler::text( $value, 2000 ), $where );
+								$doc['facts'][ $key ]['source'] = $from_ai ? 'editor_review' : 'user_input';
+							}
 							break;
 					}
 					$changed[] = $section;
@@ -96,6 +105,9 @@ final class PatchApplier {
 					$n = self::node( $doc, (string) ( $op['node_id'] ?? '' ) );
 					if ( 'intro' === $doc['sections'][ $n ]['node_id'] ) {
 						throw new CaseError( CaseError::INVALID_VALUE, '導入文は concept / summary で変更してください', $where );
+					}
+					if ( in_array( $doc['sections'][ $n ]['node_id'], self::PROSE_NODES, true ) ) {
+						throw new CaseError( CaseError::INVALID_VALUE, 'お客様のご要望・ご提案は client_request / proposal で変更してください', $where );
 					}
 					$doc['sections'][ $n ]['heading'] = ResultAssembler::line( (string) ( $op['heading'] ?? '' ), 120 );
 					$doc['sections'][ $n ]['body']    = ResultAssembler::text( (string) ( $op['body'] ?? '' ), 1500 );
@@ -192,6 +204,21 @@ final class PatchApplier {
 					$changed[] = 'photos:' . $id;
 					break;
 
+				case 'staff_comment_set':
+					$pid   = (int) ( $op['post_id'] ?? 0 );
+					$found = false;
+					foreach ( $doc['relations']['staff'] as $si => $staff ) {
+						if ( (int) $staff['post_id'] === $pid ) {
+							$doc['relations']['staff'][ $si ]['comment'] = ResultAssembler::text( (string) ( $op['comment'] ?? '' ), 600 );
+							$found = true;
+						}
+					}
+					if ( ! $found ) {
+						throw new CaseError( CaseError::INVALID_VALUE, '下書きにない担当スタッフです', $where );
+					}
+					$changed[] = 'staff:' . $pid;
+					break;
+
 				case 'layout_set':
 					$hero = (string) ( $op['hero'] ?? '' );
 					if ( ! in_array( $hero, array( 'single', 'gallery', 'before_after', 'auto' ), true ) ) {
@@ -223,6 +250,18 @@ final class PatchApplier {
 			}
 		}
 		throw new CaseError( CaseError::INVALID_VALUE, '下書きにない部分です', array( 'reason' => 'unknown_node' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $doc
+	 */
+	public static function find( array $doc, string $node_id ): ?int {
+		foreach ( $doc['sections'] as $i => $s ) {
+			if ( $s['node_id'] === $node_id ) {
+				return $i;
+			}
+		}
+		return null;
 	}
 
 	/**

@@ -59,6 +59,10 @@ final class SampleDocument {
 				'materials'      => $fact( 'sample materials' ),
 				'floor_plan'     => $fact( 'sample floor plan' ),
 				'site_area'      => $fact( 'sample site area' ),
+				'building_age'   => $fact( 'sample building age' ),
+				'parts'          => $fact( 'sample parts' ),
+				'work_type'      => $fact( 'sample work type' ),
+				'customer_voice' => $fact( 'sample customer voice' ),
 			),
 			'images'            => array(
 				$image( 1, 'before' ),
@@ -70,8 +74,11 @@ final class SampleDocument {
 			),
 			'sections'          => array(
 				$section( 'intro', 'introduction', array() ),
+				$section( 'request', 'custom', array() ),
+				$section( 'proposal', 'custom', array() ),
 				$section( 'before', 'before', array( 1, 2 ) ),
 				$section( 'during', 'during', array( 3 ) ),
+				$section( 'during2', 'during', array() ),
 				$section( 'after', 'after', array( 4, 5 ) ),
 				$section( 'compare', 'comparison', array( 1, 4 ) ),
 				$section( 'feature', 'feature', array( 6 ) ),

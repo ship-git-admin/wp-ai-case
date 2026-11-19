@@ -1,6 +1,15 @@
 <?php
 /**
- * 共通テンプレート「施工事例 ver1.1」向けの既知マッピング（AIを使わない固定ルール）。
+ * 共通テンプレート「施工事例 ver1.1」（ACF のグループ名）向けの既知マッピング（AIを使わない固定ルール）。
+ *
+ * 書き方の版（TEMPLATE_VERSION）1.2（2026-11-19）：依頼者が示した手本の事例に合わせた。
+ * - 概要（Outline）は 地域 → 建物の種類 → 築年数 → 施工箇所 → 施工内容（短い一覧）→ 工期 → 費用 …の順
+ * - 施主様名には地域を入れ、お客様の声は入力をそのまま入れる（AI に作らせない）
+ * - ご要望・ご提案は、入力だけから AI がまとめた文章（なければ入力そのもの）
+ * - 施工前：写真（短い見出し付き）→ 見出し＋文章
+ * - 施工中：工程ごとに 見出しだけの行 → その工程の写真 → 文章だけの行
+ * - 施工後：1枚目の写真を大きく → 見出し＋文章 → 残りの写真
+ * - 写真の下の説明文（_Txt）は空にし、短い見出し（_Title）だけを入れる
  *
  * CaseDocument（ACF非依存）から「テンプレートの論理名で書いた値ツリー」を作る。
  * - 論理名は、このテンプレートが前提とする構造（logical_schema）の名前。
@@ -22,13 +31,18 @@ defined( 'ABSPATH' ) || exit;
 final class ShipWorksTemplateV11 {
 
 	public const TEMPLATE_ID      = 'ship-works';
-	public const TEMPLATE_VERSION = '1.1';
+	public const TEMPLATE_VERSION = '1.2';
+
+	/** 文章の節（本文ではない）の node_id。 */
+	public const PROSE_NODES = array( 'request', 'proposal' );
 
 	/** CaseDocument の facts → Outline のレイアウトと子フィールド（並び順もこの順）。 */
 	private const OUTLINE = array(
 		'area'          => array( 'Outline_Label_Area', 'Outline_Area' ),
 		'building_type' => array( 'Outline_Label_Building-classification', 'Outline_Building-classification' ),
-		'overview'      => array( 'Outline_Label_Content', 'Outline_Content' ),
+		'building_age'  => array( 'Outline_Label_Age', 'Outline_Age' ),
+		'parts'         => array( 'Outline_Label_Parts', 'Outline_Parts' ),
+		'work_type'     => array( 'Outline_Label_Content', 'Outline_Content' ),
 		'duration'      => array( 'Outline_Label_Period', 'Outline_Period' ),
 		'cost'          => array( 'Outline_Label_Cost', 'Outline_Cost' ),
 		'floor_plan'    => array( 'Outline_Label_Floor-plan', 'Outline_Floor-plan' ),
@@ -48,8 +62,10 @@ final class ShipWorksTemplateV11 {
 		'before_after' => 'layout03',
 	);
 
-	/** 写真ユニットの表示形式（type-b = ラージ/PC2カラム）。 */
+	/** 写真ユニットの表示形式（type-a = フルサイズ/PC1カラム、type-b = ラージ/PC2カラム、type-c = ミドル/PC3カラム）。 */
 	private const UNIT_LAYOUT = 'type-b';
+	private const UNIT_LARGE  = 'type-a';
+	private const UNIT_GRID   = 'type-c';
 
 	/**
 	 * このテンプレートが値を書く論理構造。
@@ -121,6 +137,8 @@ final class ShipWorksTemplateV11 {
 			'EntryData_Description' => $f( 'textarea' ),
 			'Request'               => $f( 'wysiwyg' ),
 			'Proposal'              => $f( 'wysiwyg' ),
+			'EntryData_CustomerName'  => $f( 'text' ),
+			'EntryData_CustomerVoice' => $f( 'wysiwyg' ),
 			'EntryData_Commodity'   => $f( 'textarea' ),
 			'Outline'               => $fc( $outline ),
 			'Format'                => $fc(
@@ -228,13 +246,20 @@ final class ShipWorksTemplateV11 {
 		$fields['EntryData_CatchTxt']     = $intro ? $intro['heading'] : (string) $doc['title'];
 		$fields['EntryData_Description']  = $intro ? $intro['body'] : (string) $doc['summary'];
 
-		$request = $this->fact( $doc, 'client_request' );
-		if ( null !== $request ) {
-			$fields['Request'] = $this->paragraphs( $request );
+		// ご要望・ご提案：AI がまとめた文章（節）があればそれを、なければ入力そのものを使う。
+		foreach ( array( 'Request' => array( 'request', 'client_request' ), 'Proposal' => array( 'proposal', 'work_done' ) ) as $slot => [ $node, $fact_key ] ) {
+			$prose = $this->prose( $doc['sections'], $node ) ?? $this->fact( $doc, $fact_key );
+			if ( null !== $prose ) {
+				$fields[ $slot ] = $this->paragraphs( $prose );
+			}
 		}
-		$proposal = $this->fact( $doc, 'work_done' );
-		if ( null !== $proposal ) {
-			$fields['Proposal'] = $this->paragraphs( $proposal );
+		$area = $this->fact( $doc, 'area' );
+		if ( null !== $area ) {
+			$fields['EntryData_CustomerName'] = $area;
+		}
+		$voice = $this->fact( $doc, 'customer_voice' );
+		if ( null !== $voice ) {
+			$fields['EntryData_CustomerVoice'] = $this->paragraphs( $voice );
 		}
 		$materials = $this->fact( $doc, 'materials' );
 		if ( null !== $materials ) {
@@ -244,6 +269,9 @@ final class ShipWorksTemplateV11 {
 		$outline = array();
 		foreach ( self::OUTLINE as $fact_key => [ $layout, $sub ] ) {
 			$value = $this->fact( $doc, $fact_key );
+			if ( null === $value && 'work_type' === $fact_key ) {
+				$value = $this->fact( $doc, 'overview' ); // 施工内容の一覧がない（1.1 で作った下書き）ときは、従来どおり概要
+			}
 			if ( null !== $value ) {
 				$outline[] = array(
 					'acf_fc_layout' => $layout,
@@ -299,16 +327,46 @@ final class ShipWorksTemplateV11 {
 
 		// 1) 施工前/施工中/施工後
 		$group = array();
-		foreach ( self::PHASE_SECTION as $phase => $suffix ) {
-			$entries = array();
-			foreach ( $sections as $section ) {
-				if ( $section['kind'] === $phase ) {
-					$entries[] = $this->subtitle_row( "EntryData_Section{$suffix}_SubTitle", 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text', $section );
-				}
+		$sub   = fn( string $suffix, array $section ) => $this->subtitle_row( "EntryData_Section{$suffix}_SubTitle", 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text', $section );
+		$of    = static fn( string $kind ) => array_values( array_filter( $sections, static fn( $s ) => $s['kind'] === $kind ) );
+
+		// 施工前：写真 → 見出し＋文章
+		$mae = array();
+		if ( $by_phase['before'] ) {
+			$mae[] = $this->unit_row( 'EntryData_SectionMae_Unit', 'Mae', $by_phase['before'], self::grid( count( $by_phase['before'] ) ) );
+		}
+		foreach ( $of( 'before' ) as $section ) {
+			$mae[] = $sub( 'Mae', $section );
+		}
+
+		// 施工中：工程ごとに 見出しだけ → その工程の写真 → 文章だけ
+		$chu = array();
+		foreach ( self::steps( $of( 'during' ), $by_phase['during'] ) as [ $section, $photos ] ) {
+			if ( null !== $section && '' !== trim( (string) $section['heading'] ) ) {
+				$chu[] = $sub( 'Chu', array( 'heading' => $section['heading'], 'body' => '' ) );
 			}
-			if ( $by_phase[ $phase ] ) {
-				$entries[] = $this->unit_row( "EntryData_Section{$suffix}_Unit", $suffix, $by_phase[ $phase ] );
+			if ( $photos ) {
+				$chu[] = $this->unit_row( 'EntryData_SectionChu_Unit', 'Chu', $photos, self::UNIT_LAYOUT );
 			}
+			if ( null !== $section && '' !== trim( (string) $section['body'] ) ) {
+				$chu[] = $sub( 'Chu', array( 'heading' => '', 'body' => $section['body'] ) );
+			}
+		}
+
+		// 施工後：1枚目を大きく → 見出し＋文章 → 残りの写真
+		$go    = array();
+		$after = $by_phase['after'];
+		if ( $after ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array( $after[0] ), self::UNIT_LARGE );
+		}
+		foreach ( $of( 'after' ) as $section ) {
+			$go[] = $sub( 'Go', $section );
+		}
+		if ( count( $after ) > 1 ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array_slice( $after, 1 ), self::grid( count( $after ) - 1 ) );
+		}
+
+		foreach ( array( 'Mae' => $mae, 'Chu' => $chu, 'Go' => $go ) as $suffix => $entries ) {
 			if ( $entries ) {
 				$group[ "EntryData_Section{$suffix}" ] = $entries;
 			}
@@ -323,7 +381,7 @@ final class ShipWorksTemplateV11 {
 		// 2) 特徴解説（feature / summary / custom と、工程不明の写真）
 		$feature = array();
 		foreach ( $sections as $section ) {
-			if ( in_array( $section['kind'], array( 'feature', 'summary', 'custom' ), true ) ) {
+			if ( in_array( $section['kind'], array( 'feature', 'summary', 'custom' ), true ) && ! in_array( $section['node_id'] ?? '', self::PROSE_NODES, true ) ) {
 				$feature[] = $this->subtitle_row( 'Feature_Label_SubtitleText', 'Feature_SubtitleText_Layout', 'Feature_SubtitleText_Subtitle', 'Feature_SubtitleText_Text', $section );
 			}
 		}
@@ -358,8 +416,8 @@ final class ShipWorksTemplateV11 {
 					'EntryData_PictureBeforeAfter_Trim02'       => false,
 					'EntryData_PictureBeforeAfter_Image_Before' => $before['attachment_id'],
 					'EntryData_PictureBeforeAfter_Image_After'  => $after['attachment_id'],
-					'EntryData_PictureBeforeAfter_Txt_Before'   => $before['description'],
-					'EntryData_PictureBeforeAfter_Txt_After'    => $after['description'],
+					'EntryData_PictureBeforeAfter_Txt_Before'   => (string) ( $before['caption'] ?? '' ),
+					'EntryData_PictureBeforeAfter_Txt_After'    => (string) ( $after['caption'] ?? '' ),
 				),
 			);
 		}
@@ -399,23 +457,73 @@ final class ShipWorksTemplateV11 {
 	 * @param array<int,array<string,mixed>> $images
 	 * @return array<string,mixed>
 	 */
-	private function unit_row( string $layout, string $process, array $images ): array {
+	private function unit_row( string $layout, string $process, array $images, string $unit_layout = self::UNIT_LAYOUT ): array {
 		$rows = array();
 		foreach ( $images as $image ) {
 			$rows[] = array(
 				"EntryData_Picture{$process}_Image" => $image['attachment_id'],
 				"EntryData_Picture{$process}_Title" => (string) ( $image['caption'] ?? '' ),
-				"EntryData_Picture{$process}_Txt"   => (string) $image['description'],
+				"EntryData_Picture{$process}_Txt"   => '',
 				"EntryData_Picture{$process}_Trim"  => false,
 			);
 		}
 		return array(
 			'acf_fc_layout'                      => $layout,
-			"EntryData_Picture{$process}_layout" => self::UNIT_LAYOUT,
+			"EntryData_Picture{$process}_layout" => $unit_layout,
 			"EntryData_Picture{$process}_Pop"    => true,
 			"EntryData_Picture{$process}_Trim02" => false,
 			"EntryData_Picture{$process}"        => $rows,
 		);
+	}
+
+	/** 写真の枚数に合わせた並べ方（3枚以上は PC 3列、それ以下は 2列）。 */
+	private static function grid( int $count ): string {
+		return $count >= 3 ? self::UNIT_GRID : self::UNIT_LAYOUT;
+	}
+
+	/**
+	 * 施工中の工程（節）ごとの写真。節の写真は施工中の写真のうち、まだ使っていないもの（元の並び順）。
+	 * どの節にも入らなかった写真は、最後に見出しなしでまとめる。
+	 *
+	 * @param array<int,array<string,mixed>> $sections 施工中の節
+	 * @param array<int,array<string,mixed>> $photos   施工中の写真（元の並び順）
+	 * @return array<int,array{0:array<string,mixed>|null,1:array<int,array<string,mixed>>}>
+	 */
+	public static function steps( array $sections, array $photos ): array {
+		$used  = array();
+		$steps = array();
+		foreach ( $sections as $section ) {
+			$ids  = array_map( 'intval', (array) ( $section['image_ids'] ?? array() ) );
+			$mine = array();
+			foreach ( $photos as $photo ) {
+				$id = (int) $photo['attachment_id'];
+				if ( in_array( $id, $ids, true ) && ! isset( $used[ $id ] ) ) {
+					$mine[]      = $photo;
+					$used[ $id ] = true;
+				}
+			}
+			$steps[] = array( $section, $mine );
+		}
+		$left = array_values( array_filter( $photos, static fn( $p ) => ! isset( $used[ (int) $p['attachment_id'] ] ) ) );
+		if ( $left ) {
+			$steps[] = array( null, $left );
+		}
+		return $steps;
+	}
+
+	/**
+	 * ご要望・ご提案の文章（節）。空なら null。
+	 *
+	 * @param array<int,array<string,mixed>> $sections
+	 */
+	private function prose( array $sections, string $node_id ): ?string {
+		foreach ( $sections as $section ) {
+			if ( ( $section['node_id'] ?? '' ) === $node_id ) {
+				$body = trim( (string) $section['body'] );
+				return '' !== $body ? $body : null;
+			}
+		}
+		return null;
 	}
 
 	/**

@@ -101,6 +101,11 @@ final class DraftWriter {
 			$mapping,
 			$options + array( 'expected_images' => $built['image_ids'] )
 		);
+		// アイキャッチ（記事に含める写真だけ）。
+		$thumb = (int) ( $options['thumbnail'] ?? 0 );
+		if ( $thumb > 0 && in_array( $thumb, array_map( 'intval', $built['image_ids'] ), true ) && wp_attachment_is_image( $thumb ) ) {
+			set_post_thumbnail( $post_id, $thumb );
+		}
 		return $result + array(
 			'created' => true,
 			'hero'    => $built['hero'],

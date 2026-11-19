@@ -75,6 +75,7 @@ final class Runner {
 		}
 		if ( in_array( $group, array( 'jobs', 'all' ), true ) ) {
 			( new JobTests( $t, $user_id ) )->run();
+			( new ArticleTests( $t, $user_id ) )->run();
 		}
 		if ( in_array( $group, array( 'quota', 'all' ), true ) ) {
 			( new QuotaTests( $t, $user_id ) )->run();

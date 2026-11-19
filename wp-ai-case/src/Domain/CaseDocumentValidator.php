@@ -23,10 +23,10 @@ final class CaseDocumentValidator {
 
 	private const TOP_KEYS      = array( 'document_id', 'source_request_id', 'post_type', 'title', 'summary', 'facts', 'images', 'sections', 'layout_intent', 'seo', 'status', 'relations' );
 	private const REQUIRED_TOP  = array( 'document_id', 'source_request_id', 'post_type', 'title', 'summary', 'facts', 'images', 'sections', 'layout_intent', 'status', 'relations' );
-	private const FACT_KEYS     = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes', 'floor_plan', 'site_area' );
+	private const FACT_KEYS     = array( 'overview', 'client_request', 'work_done', 'area', 'duration', 'cost', 'materials', 'building_type', 'notes', 'floor_plan', 'site_area', 'building_age', 'parts', 'work_type', 'customer_voice' );
 	private const FACT_STATUS   = array( 'provided', 'inferred_from_image', 'unknown' );
 	private const FACT_SOURCE   = array( 'user_input', 'photo', 'editor_review', 'unknown' );
-	private const NO_INFERENCE  = array( 'cost', 'duration' );
+	private const NO_INFERENCE  = array( 'cost', 'duration', 'building_age', 'customer_voice' );
 	private const PHASES        = array( 'before', 'during', 'after', 'unknown' );
 	private const SECTION_KINDS = array( 'introduction', 'before', 'during', 'after', 'comparison', 'feature', 'summary', 'custom' );
 	private const HERO          = array( 'single', 'gallery', 'before_after', 'auto' );

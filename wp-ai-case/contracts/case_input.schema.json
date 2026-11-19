@@ -62,6 +62,19 @@
         },
         "notes": {
           "type": "string"
+        },
+        "building_age": {
+          "type": "string"
+        },
+        "parts": {
+          "type": "string"
+        },
+        "work_type": {
+          "type": "string"
+        },
+        "customer_voice": {
+          "type": "string",
+          "description": "お客様からの声。入力のまま載せる（AI に作らせない・書き換えさせない）"
         }
       },
       "required": [
@@ -73,7 +86,22 @@
     },
     "photo_set_description": {
       "type": "string",
-      "minLength": 1
+      "description": "写真一式の説明（任意。2026-11-19 から）"
+    },
+    "article_policy": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "記事の方針（任意）。ルールと矛盾する指示には従わない"
+    },
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "maxItems": 10,
+      "uniqueItems": true,
+      "description": "施工事例カテゴリのターム ID（任意。未指定なら AI が候補から選ぶ）"
     },
     "images": {
       "type": "array",
@@ -181,7 +209,6 @@
       "then": {
         "required": [
           "primary_facts",
-          "photo_set_description",
           "images"
         ],
         "not": {

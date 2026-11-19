@@ -78,8 +78,13 @@ final class IntegrationTests {
 			$format = get_field( 'Format', $main );
 			$this->t->same( array( 'EntryData_Label_Detail', 'Feature_Label', 'BeforeAfter_Label' ), array_column( (array) $format, 'acf_fc_layout' ), 'Format の並び' );
 			$detail = $format[0]['EntryData_Group_Detail'] ?? array();
-			$this->t->same( 2, count( $detail['EntryData_SectionMae'][1]['EntryData_PictureMae'] ?? array() ), '施工前の写真2枚' );
-			$this->t->true( is_array( $detail['EntryData_SectionMae'][1]['EntryData_PictureMae'][0]['EntryData_PictureMae_Image'] ?? null ), '画像は配列（sizes付き）で返る' );
+			// テンプレート 1.2：施工前は 写真 → 見出し＋文章、施工後は 1枚目を大きく（type-a）から。
+			$this->t->same( 2, count( $detail['EntryData_SectionMae'][0]['EntryData_PictureMae'] ?? array() ), '施工前の写真2枚（最初の行）' );
+			$this->t->true( is_array( $detail['EntryData_SectionMae'][0]['EntryData_PictureMae'][0]['EntryData_PictureMae_Image'] ?? null ), '画像は配列（sizes付き）で返る' );
+			$this->t->same( '', (string) ( $detail['EntryData_SectionMae'][0]['EntryData_PictureMae'][0]['EntryData_PictureMae_Txt'] ?? 'x' ), '写真の下の説明文は空（見出しだけ）' );
+			$go = $detail['EntryData_SectionGo'][0] ?? array();
+			$this->t->same( array( 'EntryData_SectionGo_Unit', 1 ), array( $go['acf_fc_layout'] ?? '', count( $go['EntryData_PictureGo'] ?? array() ) ), '施工後の最初は写真1枚' );
+			$this->t->same( 'type-a', is_array( $go['EntryData_PictureGo_layout'] ?? null ) ? ( $go['EntryData_PictureGo_layout']['value'] ?? '' ) : (string) ( $go['EntryData_PictureGo_layout'] ?? '' ), '施工後の1枚目は大きく（type-a）' );
 			$voice = get_field( 'EntryData_RelatedData', $main );
 			$this->t->true( is_array( $voice ) && $voice[0] instanceof \WP_Post && 'voice' === $voice[0]->post_type, 'お客様の声' );
 			$staff = get_field( 'EntryData_Staff', $main );

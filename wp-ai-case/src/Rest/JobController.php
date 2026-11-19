@@ -28,8 +28,9 @@ final class JobController {
 		register_rest_route( RestController::NS, '/form-options', array( 'methods' => 'GET', 'callback' => array( self::class, 'form_options' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs', array( 'methods' => 'POST', 'callback' => array( self::class, 'create' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/drafts', array( 'methods' => 'GET', 'callback' => array( self::class, 'drafts' ), 'permission_callback' => $perm ) );
+		register_rest_route( RestController::NS, '/import', array( 'methods' => 'POST', 'callback' => array( self::class, 'import' ), 'permission_callback' => $perm ) );
 		register_rest_route( RestController::NS, '/jobs/' . self::UUID, array( 'methods' => 'GET', 'callback' => array( self::class, 'show' ), 'permission_callback' => $perm ) );
-		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save' ) as $action ) {
+		foreach ( array( 'tick', 'cancel', 'retry', 'revise', 'undo', 'redo', 'save', 'meta' ) as $action ) {
 			register_rest_route( RestController::NS, '/jobs/' . self::UUID . '/' . $action, array( 'methods' => 'POST', 'callback' => array( self::class, $action ), 'permission_callback' => $perm ) );
 		}
 	}
@@ -64,6 +65,7 @@ final class JobController {
 			'error'      => $pre['error'],
 			'voices'     => $list( 'voice' ),
 			'staff'      => $list( 'staff' ),
+			'categories' => JobService::categories(),
 			'sections'   => PatchApplier::SECTIONS,
 			'quota'      => array_intersect_key( ( new \WpAiCase\Quota\QuotaService() )->summary(), array_flip( array( 'limit', 'remaining', 'resets_on' ) ) ),
 		);
@@ -74,6 +76,25 @@ final class JobController {
 	 */
 	public static function drafts(): \WP_REST_Response {
 		return new \WP_REST_Response( array( 'drafts' => JobService::list_drafts( get_current_user_id() ) ) );
+	}
+
+	/**
+	 * 既存ページの貼り付けから入力欄の値を取り出す（下書きは作らない）。
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function import( \WP_REST_Request $r ) {
+		try {
+			return new \WP_REST_Response( ( new JobService() )->import( (array) $r->get_json_params(), get_current_user_id() ) );
+		} catch ( JobError $e ) {
+			return new \WP_Error( 'wpaic_error', $e->response['message'] ?? '', array( 'status' => $e->status, 'error' => $e->response ) + $e->extra );
+		}
+	}
+
+	public static function meta( \WP_REST_Request $r ) {
+		$p    = (array) $r->get_json_params();
+		$base = (int) ( $p['base_index'] ?? -1 );
+		return self::run( static fn( JobService $s, int $u ) => $s->set_meta( (string) $r['id'], $u, $base, array_intersect_key( $p, array_flip( array( 'terms', 'thumbnail_id' ) ) ) ) );
 	}
 
 	public static function create( \WP_REST_Request $r ) {

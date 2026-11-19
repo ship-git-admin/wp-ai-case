@@ -48,7 +48,8 @@
           "photos",
           "before_after",
           "layout",
-          "seo"
+          "seo",
+          "staff"
         ]
       }
     },
@@ -108,7 +109,11 @@
                   "building_type",
                   "notes",
                   "floor_plan",
-                  "site_area"
+                  "site_area",
+                  "building_age",
+                  "parts",
+                  "work_type",
+                  "customer_voice"
                 ]
               },
               "value": {
@@ -353,6 +358,34 @@
               "node_id",
               "heading",
               "body"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "const": "staff_comment_set"
+              },
+              "section": {
+                "const": "staff"
+              },
+              "post_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "comment": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "post_id",
+              "comment"
             ],
             "additionalProperties": false
           }

@@ -32,4 +32,11 @@ interface ProviderInterface {
 	 * @param array<string,mixed> $payload model, document（画像データなし）, allowed_sections, instruction
 	 */
 	public function revise( array $payload ): ProviderResult;
+
+	/**
+	 * 既存ページの文章から、一次情報を項目ごとに取り出す（成功時 data: content=Prompts::extract_schema の形、usage）。
+	 *
+	 * @param array<string,mixed> $payload model, text（タグを除いたページの文章）
+	 */
+	public function extract( array $payload ): ProviderResult;
 }

@@ -27,7 +27,13 @@ final class DraftState {
 	public const TITLE_SLOT = '@post_title';
 
 	/** 論理名 → 画面での呼び名（人が編集した部分の案内に使う）。 */
+	/** 保存の結果の表示用（論理名ではない）：施工事例カテゴリ・アイキャッチ。 */
+	public const TERMS_SLOT = '_terms';
+	public const THUMB_SLOT = '_thumbnail';
+
 	public const SLOT_LABELS = array(
+		self::TERMS_SLOT        => '施工事例カテゴリ',
+		self::THUMB_SLOT        => 'アイキャッチ画像',
 		self::TITLE_SLOT        => 'タイトル',
 		'FV_Layout'             => 'トップの写真レイアウト',
 		'EntryData_CatchImg'    => 'トップの写真（1枚）',
@@ -37,6 +43,8 @@ final class DraftState {
 		'EntryData_Description' => 'コンセプト説明',
 		'Request'               => 'お客様のご要望',
 		'Proposal'              => '実施した工事・工夫',
+		'EntryData_CustomerName'  => '施主様名',
+		'EntryData_CustomerVoice' => 'お客様からの声',
 		'EntryData_Commodity'   => '使用商材・建材',
 		'Outline'               => '施工概要',
 		'Format'                => '本文と写真',
@@ -192,15 +200,40 @@ final class DraftState {
 	 * @return string[]
 	 */
 	public static function edited_slots( int $post_id, array $state, array $mapping, array $groups, ?array $only = null ): array {
-		$now     = self::db_prints( $post_id, self::slot_fields( $mapping, $groups ), $only );
-		$changed = array();
+		$fields   = self::slot_fields( $mapping, $groups );
+		$now      = self::db_prints( $post_id, $fields, $only );
+		$registry = new FieldAdapterRegistry( false );
+		$changed  = array();
 		foreach ( $now as $slot => $print ) {
 			$saved = $state['db'][ $slot ] ?? null;
-			if ( null === $saved || ! hash_equals( (string) $saved, $print ) ) {
+			if ( null === $saved ) {
+				// 保存したときに記録していない部分（テンプレートの更新で増えた項目など）は、今も空なら人は触っていない。
+				if ( ! isset( $fields[ $slot ] ) || ! self::is_empty_print( $registry, $fields[ $slot ], $print ) ) {
+					$changed[] = $slot;
+				}
+				continue;
+			}
+			if ( ! hash_equals( (string) $saved, $print ) ) {
 				$changed[] = $slot;
 			}
 		}
 		return $changed;
+	}
+
+	/**
+	 * @param array<string,mixed> $field
+	 */
+	private static function is_empty_print( FieldAdapterRegistry $registry, array $field, string $print ): bool {
+		foreach ( array( null, '', array(), false ) as $empty ) {
+			try {
+				if ( hash_equals( self::print( $registry->normalize( $field, $empty ) ), $print ) ) {
+					return true;
+				}
+			} catch ( \Throwable $e ) {
+				continue;
+			}
+		}
+		return false;
 	}
 
 	/**

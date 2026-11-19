@@ -84,7 +84,24 @@ final class MappingService {
 		$active = $this->first( $this->repo->by_context( $cur['context_hash'], 'approved_active' ) );
 
 		if ( $active && $active['schema_sha256'] === $cur['schema_sha256'] ) {
-			return $this->summary( 'ready', $active, $cur, null, array(), $with_display );
+			if ( self::template_version( $active ) === ShipWorksTemplateV11::TEMPLATE_VERSION ) {
+				return $this->summary( 'ready', $active, $cur, null, array(), $with_display );
+			}
+			// テンプレート（書き方）の版が上がった：ACF は同じで、結び付けが「足すだけ」なら引き継ぐ。
+			$res = $this->resolver->resolve( ShipWorksTemplateV11::logical_schema(), $cur['groups'], $this->by_slot( $active ) );
+			if ( $this->additive( $active, $res ) && ! $this->local_check( $res['bindings'], $cur['groups'] ) ) {
+				$from                                         = self::template_version( $active );
+				$doc                                          = $active['document'];
+				$doc['validation']['staging_display_passed'] = false;
+				$doc['validation']['evidence_ref']           = 'template_update_from_v' . $active['mapping_version'] . '@' . $from;
+				$doc['notes']                                = "テンプレートの書き方を {$from} から " . ShipWorksTemplateV11::TEMPLATE_VERSION . ' に更新。承認済みの結び付けはそのまま引き継ぎ、新しい項目の結び付けだけを足した（構造検証は合格）。新しい項目の表示の確認が必要。';
+				$new = $this->create_version( $active['mapping_id'], $cur, $res['bindings'], 'approved_active', $actor, 'template_update', "テンプレートの書き方の更新（{$from} → " . ShipWorksTemplateV11::TEMPLATE_VERSION . '）。結び付けは追加のみ', $doc, $active['schema_sha256'] );
+				$this->transition( $active, 'retired', 'retire', "テンプレートの更新 v{$new['mapping_version']} に置き換え", $actor, $cur );
+				return $this->summary( 'ready', $new, $cur, 'template_update', array(), $with_display );
+			}
+			$reason  = 'テンプレートの書き方の更新（' . self::template_version( $active ) . ' → ' . ShipWorksTemplateV11::TEMPLATE_VERSION . '）に、承認済みの結び付けを引き継げません。マッピングの提案からやり直してください';
+			$blocked = $this->transition( $active, 'blocked_drift', 'schema_drift', $reason, $actor, $cur, array(), array(), $this->affected_drafts( $cur['context_hash'] ) );
+			return $this->summary( 'blocked_drift', $blocked, $cur, 'template_update', $res['problems'], $with_display );
 		}
 
 		if ( $active ) {
@@ -271,8 +288,9 @@ final class MappingService {
 		}
 		$cur                                           = $this->require_same_definition( $row, $context );
 		$doc                                           = $row['document'];
-		$doc['validation']['staging_display_passed']   = true;
-		$doc['validation']['tested_theme_fingerprint'] = SchemaInspector::theme_fingerprint();
+		$doc['validation']['staging_display_passed']    = true;
+		$doc['validation']['staging_write_read_passed'] = true; // 確認用の下書きは保存と読み戻しを済ませて作る
+		$doc['validation']['tested_theme_fingerprint']  = SchemaInspector::theme_fingerprint();
 		$doc['validation']['verified_at']              = gmdate( 'Y-m-d\TH:i:s\Z' );
 		$doc['validation']['evidence_ref']             = trim( (string) $doc['validation']['evidence_ref'] . ' ; display_recheck: ' . $evidence, ' ;' );
 		$updated = $this->repo->compare_and_set( $row, 'approved_active', $doc );
@@ -423,6 +441,43 @@ final class MappingService {
 			return $this->bound_hash( $res['bindings'], $groups ) === (string) $prev['bound_sha256'] ? 'compatible' : 'root_supported';
 		}
 		return $key_only ? 'key_only' : 'root_supported';
+	}
+
+	/**
+	 * 版に記録したテンプレート（書き方）の版。
+	 *
+	 * @param array<string,mixed> $row
+	 */
+	public static function template_version( array $row ): string {
+		return (string) ( $row['document']['template_ref']['template_version'] ?? '' );
+	}
+
+	/**
+	 * 新しい結び付けが「前の版の結び付けをすべてそのまま含み、足しただけ」か。
+	 *
+	 * @param array<string,mixed>                                                            $prev
+	 * @param array{bindings:array<int,array<string,mixed>>,problems:array<int,array<string,string>>} $res
+	 */
+	public function additive( array $prev, array $res ): bool {
+		if ( $res['problems'] ) {
+			return false;
+		}
+		$new = array();
+		foreach ( $res['bindings'] as $binding ) {
+			$new[ (string) $binding['semantic_slot'] ] = $binding;
+		}
+		foreach ( $this->by_slot( $prev ) as $slot => $p ) {
+			$b = $new[ $slot ] ?? null;
+			if ( null === $b ) {
+				return false;
+			}
+			foreach ( array( 'field_key', 'field_type', 'path', 'transform_id', 'layout_name', 'layout_key' ) as $k ) {
+				if ( ( $p[ $k ] ?? '' ) !== ( $b[ $k ] ?? '' ) ) {
+					return false;
+				}
+			}
+		}
+		return count( $new ) > count( $this->by_slot( $prev ) );
 	}
 
 	/**
@@ -625,6 +680,9 @@ final class MappingService {
 		if ( $with_display && $row ) {
 			$tested  = (string) ( $row['document']['validation']['tested_theme_fingerprint'] ?? '' );
 			$display = empty( $row['document']['validation']['staging_display_passed'] ) ? 'unverified' : ( SchemaInspector::theme_fingerprint() === $tested ? 'verified' : 'recheck_required' );
+			if ( 'unverified' === $display && 'approved_active' === $row['status'] && str_starts_with( (string) ( $row['document']['validation']['evidence_ref'] ?? '' ), 'template_update_from' ) ) {
+				$display = 'template_update';
+			}
 		}
 		return array(
 			'state'          => $state,

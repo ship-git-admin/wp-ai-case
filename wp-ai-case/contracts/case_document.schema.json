@@ -37,7 +37,11 @@
           "building_type",
           "notes",
           "floor_plan",
-          "site_area"
+          "site_area",
+          "building_age",
+          "parts",
+          "work_type",
+          "customer_voice"
         ]
       },
       "additionalProperties": {
