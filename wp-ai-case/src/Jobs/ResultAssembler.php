@@ -115,7 +115,7 @@ final class ResultAssembler {
 			$sections[] = array(
 				'node_id'            => 's' . ( $n + 1 ),
 				'kind'               => $s['kind'],
-				'heading'            => self::line( (string) ( $s['heading'] ?? '' ), 120 ),
+				'heading'            => in_array( $s['kind'], array( 'before', 'during', 'after' ), true ) ? self::heading( (string) ( $s['heading'] ?? '' ) ) : self::line( (string) ( $s['heading'] ?? '' ), 120 ),
 				'body'               => self::text( (string) ( $s['body'] ?? '' ), 1500 ),
 				'image_ids'          => $sids,
 				'evidence_image_ids' => $sids,
@@ -179,12 +179,7 @@ final class ResultAssembler {
 	 * AI・取り込みのキャプション：工程の名前（テーマが見出しとして出す）を除き、残りが「写真」「様子」だけなら空にする。最大40文字。
 	 */
 	public static function caption( string $v ): string {
-		$phase = '(?:施工前|施工中|施工後|工事前|工事中|工事後|施工完了|完成|ビフォー|アフター|before|after)';
-		$sep   = '[\s　の：:・\-－―／\/|｜（）()\[\]【】「」]*';
-		$v     = self::line( $v, 100 );
-		$v     = (string) preg_replace( '/^' . $sep . $phase . $sep . '/iu', '', $v );
-		$v     = (string) preg_replace( '/' . $sep . $phase . $sep . '$/iu', '', $v );
-		$v     = (string) preg_replace( '/^[\s　・：:／\/|｜\-]+|[\s　・：:／\/|｜\-]+$/u', '', $v ); // trim() は文字単位でないので使わない
+		$v = self::strip_labels( self::line( $v, 100 ), \WpAiCase\Display\DisplayNotes::labels( 'photo_caption' ) );
 		if ( preg_match( '/^(?:の)?(?:写真|画像|表示画像|様子|状態|状況|全景|イメージ|image|photo)?$/iu', $v ) ) {
 			return '';
 		}
@@ -192,6 +187,38 @@ final class ResultAssembler {
 			return ''; // 文は見出しにしない（本文の文章を写したもの）
 		}
 		return mb_substr( $v, 0, 40 );
+	}
+
+	/**
+	 * 施工前・施工中・施工後の小見出し：工程の名前とテーマが出すラベルを前後から除く（残りが空なら空）。
+	 */
+	public static function heading( string $v ): string {
+		return mb_substr( self::strip_labels( self::line( $v, 120 ), \WpAiCase\Display\DisplayNotes::labels( 'section_heading' ) ), 0, 120 );
+	}
+
+	/**
+	 * 前後にある工程の名前・テーマのラベル（表示メモの theme_labels）を除く。
+	 *
+	 * @param string[] $labels
+	 */
+	public static function strip_labels( string $v, array $labels = array() ): string {
+		$words = array( '施工前', '施工中', '施工後', '工事前', '工事中', '工事後', '施工完了', '完成', 'ビフォー', 'アフター', 'before', 'after' );
+		foreach ( $labels as $l ) {
+			$words[] = (string) $l;
+		}
+		$words = array_values( array_unique( array_filter( $words, static fn( $w ) => '' !== trim( $w ) ) ) );
+		usort( $words, static fn( $a, $b ) => mb_strlen( $b ) <=> mb_strlen( $a ) ); // 長い言葉から
+		$alt = implode( '|', array_map( static fn( $w ) => preg_quote( $w, '/' ), $words ) );
+		$sep = '[\s　の：:・\-－―／\/|｜（）()\[\]【】「」]*';
+		for ( $i = 0; $i < 3; $i++ ) {
+			$before = $v;
+			$v      = (string) preg_replace( '/^' . $sep . '(?:' . $alt . ')' . $sep . '/iu', '', $v );
+			$v      = (string) preg_replace( '/' . $sep . '(?:' . $alt . ')' . $sep . '$/iu', '', $v );
+			if ( $before === $v ) {
+				break;
+			}
+		}
+		return (string) preg_replace( '/^[\s　・：:／\/|｜\-]+|[\s　・：:／\/|｜\-]+$/u', '', $v ); // trim() は文字単位でないので使わない
 	}
 
 	public static function line( string $v, int $max ): string {

@@ -109,7 +109,8 @@ final class PatchApplier {
 					if ( in_array( $doc['sections'][ $n ]['node_id'], self::PROSE_NODES, true ) ) {
 						throw new CaseError( CaseError::INVALID_VALUE, 'お客様のご要望・ご提案は client_request / proposal で変更してください', $where );
 					}
-					$doc['sections'][ $n ]['heading'] = ResultAssembler::line( (string) ( $op['heading'] ?? '' ), 120 );
+					$phase_kind                       = in_array( $doc['sections'][ $n ]['kind'], array( 'before', 'during', 'after' ), true );
+					$doc['sections'][ $n ]['heading'] = $from_ai && $phase_kind ? ResultAssembler::heading( (string) ( $op['heading'] ?? '' ) ) : ResultAssembler::line( (string) ( $op['heading'] ?? '' ), 120 );
 					$doc['sections'][ $n ]['body']    = ResultAssembler::text( (string) ( $op['body'] ?? '' ), 1500 );
 					$changed[]                        = 'body:' . $doc['sections'][ $n ]['node_id'];
 					break;

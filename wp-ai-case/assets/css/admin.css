@@ -24,3 +24,10 @@
 .wpaic-map-more table { table-layout: fixed; width: 100%; }
 .wpaic-map-more td, .wpaic-map-more th { overflow-wrap: anywhere; }
 .wpaic-map-steps li.is-recheck { background: #fcf9e8; border-color: #dba617; color: #614a00; }
+.wpaic-map-notes { max-width: 1100px; margin: 8px 0; table-layout: fixed; }
+.wpaic-map-notes th:first-child { width: 160px; }
+.wpaic-map-notes td, .wpaic-map-notes th { overflow-wrap: anywhere; }
+@media (max-width: 782px) {
+	.wpaic-map-notes, .wpaic-map-notes tbody, .wpaic-map-notes tr, .wpaic-map-notes th, .wpaic-map-notes td { display: block; width: auto !important; }
+	.wpaic-map-notes thead { display: none; }
+}

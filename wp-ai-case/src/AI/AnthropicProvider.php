@@ -117,6 +117,19 @@ final class AnthropicProvider implements ProviderInterface {
 		return $this->messages( Prompts::SYSTEM_EXTRACT, $content, Prompts::extract_schema(), (string) $payload['model'], 90 );
 	}
 
+	public function display_notes( array $payload ): ProviderResult {
+		if ( null === $this->client ) {
+			return ProviderResult::unavailable();
+		}
+		$content = array(
+			array(
+				'type' => 'text',
+				'text' => Prompts::display_text( $payload ),
+			),
+		);
+		return $this->messages( Prompts::SYSTEM_DISPLAY, $content, Prompts::display_schema(), (string) $payload['model'], 240 );
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>> $content
 	 * @param array<string,mixed>            $schema

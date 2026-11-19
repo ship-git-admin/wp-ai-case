@@ -76,6 +76,19 @@ wp ai-case mapping propose --user=<admin>
 ```
 提案した版は、ステージングで保存・読み戻し → 実表示の確認（`mapping confirm-display`）→ 承認（`mapping approve`）の順に進めます。履歴は `mapping history <mapping_id>`、以前の版へ戻すときは `mapping rollback` を使います。
 
+### テーマでの表示（表示メモ）
+マッピング画面の「テーマでの表示（表示メモ）」で、施工事例の表示に使うテーマのファイルを読み取り専用で AI に送り、欄ごとの表示のされ方（テーマが自分で出す見出し・alt や一覧カードでの使われ方・長さ）をまとめます。承認したメモを、記事の作成・修正と保存前のチェックに使います。テーマのファイルが変わると「作り直しが必要」になります。
+
+```bash
+wp ai-case display files --user=<admin>
+```
+```bash
+wp ai-case display build --yes --user=<admin>
+```
+```bash
+wp ai-case display approve --user=<admin>
+```
+
 プラグインの更新で記事の書き方（テンプレートの版）が上がり、書き込む項目が増えるだけのときは、承認済みのマッピングを自動で引き継ぎます。このときマッピング画面に「確認が必要」と出るので、表示確認用の下書きを作ってプレビューで確かめ、記録してください（確認の間も保存は続けられます）。
 
 ## 配布と更新

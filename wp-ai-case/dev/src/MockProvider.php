@@ -162,6 +162,34 @@ final class MockProvider implements ProviderInterface {
 		return ProviderResult::success( 200, array( 'content' => array( 'operations' => $ops ), 'usage' => array( 'input_tokens' => 1500, 'output_tokens' => 200 ) ) );
 	}
 
+	/** 試験用：表示メモで返す、写真の見出しのテーマのラベル。 */
+	public static array $display_labels = array( '施工前', '施工中', '施工後', '模擬ラベル' );
+
+	public function display_notes( array $payload ): ProviderResult {
+		++self::$calls;
+		self::$payloads[] = $payload;
+		if ( ! in_array( $this->scenario, array( 'ok', 'bad_ids', 'evil' ), true ) ) {
+			return $this->probe( (string) $payload['model'] );
+		}
+		$targets = array();
+		foreach ( (array) ( $payload['targets'] ?? array() ) as $t ) {
+			$targets[] = array(
+				'id'           => (string) $t['id'],
+				'shown'        => 'seo' !== $t['id'],
+				'where'        => '【模擬】' . (string) $t['name'],
+				'theme_labels' => in_array( $t['id'], array( 'photo_caption', 'section_heading' ), true ) ? self::$display_labels : array(),
+				'also_used_as' => 'catch' === $t['id'] ? array( '一覧のカードのタイトル' ) : array(),
+				'length_hint'  => '',
+				'avoid'        => array(),
+			);
+		}
+		if ( 'evil' === $this->scenario ) {
+			$targets[] = array( 'id' => 'unknown_target', 'shown' => true, 'where' => 'x', 'theme_labels' => array(), 'also_used_as' => array(), 'length_hint' => '', 'avoid' => array() );
+			$targets[0]['where'] = '<script>x</script>' . str_repeat( '長', 500 );
+		}
+		return ProviderResult::success( 200, array( 'content' => array( 'targets' => $targets, 'warnings' => array( '【模擬】注意' ) ), 'usage' => array( 'input_tokens' => 20000, 'output_tokens' => 1500 ) ) );
+	}
+
 	public function extract( array $payload ): ProviderResult {
 		++self::$calls;
 		self::$payloads[] = $payload;

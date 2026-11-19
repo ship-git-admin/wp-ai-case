@@ -33,6 +33,7 @@ final class CaseError extends \RuntimeException {
 	public const QUOTA_EXCEEDED         = 'quota_exceeded';
 	public const QUOTA_BUSY             = 'quota_busy';
 	public const COST_LIMIT             = 'cost_limit';
+	public const PROVIDER_FAILED        = 'provider_failed';
 
 	private const AI_CODES = array(
 		self::UNSUPPORTED_FIELD_TYPE => 'AI-010',
@@ -53,6 +54,7 @@ final class CaseError extends \RuntimeException {
 		self::QUOTA_EXCEEDED         => 'AI-013',
 		self::QUOTA_BUSY             => 'AI-011',
 		self::COST_LIMIT             => 'AI-014',
+		self::PROVIDER_FAILED        => 'AI-018',
 	);
 
 	/** @var string */

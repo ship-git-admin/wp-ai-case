@@ -64,7 +64,7 @@ final class Runner {
 			( new UnitTests( $t ) )->run();
 		}
 		$user_id = get_current_user_id();
-		if ( in_array( $group, array( 'mapping', 'diag', 'jobs', 'quota', 'integration', 'all' ), true ) && $user_id < 1 ) {
+		if ( in_array( $group, array( 'mapping', 'diag', 'jobs', 'display', 'quota', 'integration', 'all' ), true ) && $user_id < 1 ) {
 			\WP_CLI::error( 'mapping / diag / jobs / integration には --user=<管理者> が必要です' );
 		}
 		if ( in_array( $group, array( 'diag', 'all' ), true ) ) {
@@ -76,6 +76,9 @@ final class Runner {
 		if ( in_array( $group, array( 'jobs', 'all' ), true ) ) {
 			( new JobTests( $t, $user_id ) )->run();
 			( new ArticleTests( $t, $user_id ) )->run();
+		}
+		if ( in_array( $group, array( 'jobs', 'display', 'all' ), true ) ) {
+			( new DisplayTests( $t, $user_id ) )->run();
 		}
 		if ( in_array( $group, array( 'quota', 'all' ), true ) ) {
 			( new QuotaTests( $t, $user_id ) )->run();

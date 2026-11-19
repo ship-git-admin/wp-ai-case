@@ -496,6 +496,7 @@ final class JobService {
 			'allowed_sections' => $allowed,
 			'instruction'      => $instruction,
 			'article_policy'   => (string) ( $job['data']['input']['article_policy'] ?? '' ),
+			'display_notes'    => \WpAiCase\Display\DisplayNotes::for_prompt(),
 		);
 		try {
 			$this->cost->check( 'revise', CostGuard::estimate( Settings::model(), 0, strlen( (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) )['usd'] );
@@ -970,6 +971,7 @@ final class JobService {
 			'facts'                 => $data['input']['primary_facts'],
 			'photo_set_description' => $data['input']['photo_set_description'],
 			'article_policy'        => (string) ( $data['input']['article_policy'] ?? '' ),
+			'display_notes'         => \WpAiCase\Display\DisplayNotes::for_prompt(),
 			'categories'            => (array) ( $data['input']['terms'] ?? array() ) ? array() : self::categories(),
 			'staff_comment_needed'  => array_values( array_map( static fn( $i ) => $i + 1, array_keys( array_filter( array_values( (array) ( $data['input']['relations']['staff'] ?? array() ) ), static fn( $s ) => '' === (string) $s['comment'] ) ) ) ),
 			'images'                => $list,

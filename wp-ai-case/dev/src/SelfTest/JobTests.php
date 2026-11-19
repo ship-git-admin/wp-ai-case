@@ -163,7 +163,7 @@ final class JobTests {
 			$this->t->same( 1, MockProvider::$calls, '外部呼び出しは1回' );
 			$p = MockProvider::$payloads[0];
 			$this->t->true( ! isset( $p['images'][0]['data'] ), 'Mock には画像データを渡さない（Claude のときだけ縮小コピーを作る）' );
-			$this->t->same( array(), array_values( array_diff( array_keys( $p ), array( 'model', 'mode', 'facts', 'photo_set_description', 'article_policy', 'categories', 'staff_comment_needed', 'images', 'prior_analysis' ) ) ), '送る項目（関連付け・投稿IDなどを送らない）' );
+			$this->t->same( array(), array_values( array_diff( array_keys( $p ), array( 'model', 'mode', 'facts', 'photo_set_description', 'article_policy', 'display_notes', 'categories', 'staff_comment_needed', 'images', 'prior_analysis' ) ) ), '送る項目（関連付け・投稿IDなどを送らない）' );
 			$this->t->same( array(), $p['staff_comment_needed'], 'コメントが入力済みの担当スタッフは、AIに頼まない' );
 			$this->t->same( 'claude-haiku-5-5', $p['model'], 'モデル' );
 			$this->t->true( ! empty( $job['data']['questions'] ), 'AIからの確認事項' );
@@ -567,7 +567,7 @@ final class JobTests {
 					$check( $v, "{$path}|{$i}", $depth );
 				}
 			};
-			foreach ( array( 'compose' => \WpAiCase\AI\Prompts::compose_schema( true ), 'analyze' => \WpAiCase\AI\Prompts::compose_schema( false ), 'revise' => \WpAiCase\AI\Prompts::revise_schema(), 'extract' => \WpAiCase\AI\Prompts::extract_schema() ) as $name => $schema ) {
+			foreach ( array( 'compose' => \WpAiCase\AI\Prompts::compose_schema( true ), 'analyze' => \WpAiCase\AI\Prompts::compose_schema( false ), 'revise' => \WpAiCase\AI\Prompts::revise_schema(), 'extract' => \WpAiCase\AI\Prompts::extract_schema(), 'display' => \WpAiCase\AI\Prompts::display_schema() ) as $name => $schema ) {
 				if ( 'object' !== ( $schema['type'] ?? '' ) || isset( $schema['anyOf'] ) ) {
 					$errors[] = "{$name}: 最上位";
 				}

@@ -39,4 +39,11 @@ interface ProviderInterface {
 	 * @param array<string,mixed> $payload model, text（タグを除いたページの文章）
 	 */
 	public function extract( array $payload ): ProviderResult;
+
+	/**
+	 * テーマのファイルから表示メモを作る（成功時 data: content=Prompts::display_schema の形、usage）。
+	 *
+	 * @param array<string,mixed> $payload model, frame, targets, files（path / content）
+	 */
+	public function display_notes( array $payload ): ProviderResult;
 }
