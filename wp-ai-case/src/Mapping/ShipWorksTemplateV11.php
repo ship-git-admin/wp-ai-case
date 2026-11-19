@@ -20,6 +20,9 @@
  * - 施工後は 写真（PC 2列）→ 文章。1列（フルサイズ）は使わない（2026-11-19 依頼者の指示）
  * ACF の構造（論理名）は 1.2 と同じなので、TEMPLATE_VERSION は変えない（マッピングはそのまま使える）。
  *
+ * 並べ方の決まり（列の数・施工後の1枚目を大きくするか・小見出し・写真の見出し・トリミングの自動設定）は、
+ * 管理画面「記事の作り方」の設定（Display\ArticleSettings の layout）に従う。上はその初期値。
+ *
  * CaseDocument（ACF非依存）から「テンプレートの論理名で書いた値ツリー」を作る。
  * - 論理名は、このテンプレートが前提とする構造（logical_schema）の名前。
  * - 実際の保存先（field key・名前・型・階層）は、サイトごとに承認されたマッピング（bindings）で
@@ -46,6 +49,9 @@ final class ShipWorksTemplateV11 {
 
 	/** 試験用：画像の大きさ（attachment_id => [幅, 高さ]）。指定がなければメディアの情報を使う。 */
 	private array $dims = array();
+
+	/** 並べ方の設定（ArticleSettings の layout）。 */
+	private array $layout = array();
 
 	/** 文章の節（本文ではない）の node_id。 */
 	public const PROSE_NODES = array( 'request', 'proposal' );
@@ -217,7 +223,8 @@ final class ShipWorksTemplateV11 {
 	 * @return array{post:array<string,string>,fields:array<string,mixed>,hero:string,image_ids:int[]}
 	 */
 	public function build( array $doc, array $options = array() ): array {
-		$this->dims = (array) ( $options['dims'] ?? array() );
+		$this->dims   = (array) ( $options['dims'] ?? array() );
+		$this->layout = (array) ( $options['layout'] ?? \WpAiCase\Display\ArticleSettings::get()['layout'] );
 		$images     = $this->included_images( $doc['images'] );
 		$by_phase = array(
 			'before'  => array(),
@@ -347,13 +354,15 @@ final class ShipWorksTemplateV11 {
 		$sub   = fn( string $suffix, array $section ) => $this->subtitle_row( "EntryData_Section{$suffix}_SubTitle", 'EntryData_Detail_Layout', 'EntryData_Detail_Catch', 'EntryData_Detail_Text', $section );
 		$of    = static fn( string $kind ) => array_values( array_filter( $sections, static fn( $s ) => $s['kind'] === $kind ) );
 
-		// 施工前：写真 → 見出し＋文章
+		$phase_heading = ! empty( $this->layout['phase_headings'] );
+
+		// 施工前：写真 → 文章（小見出しは設定で付ける）
 		$mae = array();
 		if ( $by_phase['before'] ) {
-			$mae[] = $this->unit_row( 'EntryData_SectionMae_Unit', 'Mae', $by_phase['before'], self::grid( count( $by_phase['before'] ) ) );
+			$mae[] = $this->unit_row( 'EntryData_SectionMae_Unit', 'Mae', $by_phase['before'], $this->columns( 'before_columns', count( $by_phase['before'] ) ) );
 		}
 		foreach ( $of( 'before' ) as $section ) {
-			$mae[] = $sub( 'Mae', array( 'heading' => '', 'body' => $section['body'] ) ); // 小見出しなし（手本と同じ）
+			$mae[] = $sub( 'Mae', array( 'heading' => $phase_heading ? $section['heading'] : '', 'body' => $section['body'] ) );
 		}
 
 		// 施工中：工程ごとに 見出しだけ → その工程の写真 → 文章だけ
@@ -363,21 +372,31 @@ final class ShipWorksTemplateV11 {
 				$chu[] = $sub( 'Chu', array( 'heading' => $section['heading'], 'body' => '' ) );
 			}
 			if ( $photos ) {
-				$chu[] = $this->unit_row( 'EntryData_SectionChu_Unit', 'Chu', $photos, self::UNIT_LAYOUT );
+				$chu[] = $this->unit_row( 'EntryData_SectionChu_Unit', 'Chu', $photos, $this->columns( 'during_columns', count( $photos ) ) );
 			}
 			if ( null !== $section && '' !== trim( (string) $section['body'] ) ) {
 				$chu[] = $sub( 'Chu', array( 'heading' => '', 'body' => $section['body'] ) );
 			}
 		}
 
-		// 施工後：写真（PC 2列）→ 文章。1列（フルサイズ）は使わない。
+		// 施工後：写真（初期値は PC 2列）→ 文章。設定で、1枚目を1列（フルサイズ）で大きく → 文章 → 残り にもできる。
 		$go    = array();
 		$after = $by_phase['after'];
-		if ( $after ) {
-			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', $after, self::UNIT_LAYOUT );
-		}
+		$texts = array();
 		foreach ( $of( 'after' ) as $section ) {
-			$go[] = $sub( 'Go', array( 'heading' => '', 'body' => $section['body'] ) ); // 小見出しなし（手本と同じ）
+			$texts[] = $sub( 'Go', array( 'heading' => $phase_heading ? $section['heading'] : '', 'body' => $section['body'] ) );
+		}
+		if ( $after && ! empty( $this->layout['after_large'] ) ) {
+			$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array( $after[0] ), self::UNIT_LARGE );
+			$go   = array_merge( $go, $texts );
+			if ( count( $after ) > 1 ) {
+				$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', array_slice( $after, 1 ), $this->columns( 'after_columns', count( $after ) - 1 ) );
+			}
+		} else {
+			if ( $after ) {
+				$go[] = $this->unit_row( 'EntryData_SectionGo_Unit', 'Go', $after, $this->columns( 'after_columns', count( $after ) ) );
+			}
+			$go = array_merge( $go, $texts );
 		}
 
 		foreach ( array( 'Mae' => $mae, 'Chu' => $chu, 'Go' => $go ) as $suffix => $entries ) {
@@ -479,7 +498,7 @@ final class ShipWorksTemplateV11 {
 			$untrim  = $untrim || $this->off43( $id );
 			$rows[]  = array(
 				"EntryData_Picture{$process}_Image" => $id,
-				"EntryData_Picture{$process}_Title" => '', // 写真の見出しは出さない（手本と同じ）
+				"EntryData_Picture{$process}_Title" => ! empty( $this->layout['photo_titles'] ) ? (string) ( $image['caption'] ?? '' ) : '', // 初期値は出さない（手本と同じ）
 				"EntryData_Picture{$process}_Txt"   => '',
 				"EntryData_Picture{$process}_Trim"  => $this->portrait( $id ), // 縦長用リサイズ
 			);
@@ -507,14 +526,29 @@ final class ShipWorksTemplateV11 {
 		return ( $w > 0 && $h > 0 ) ? $w / $h : null;
 	}
 
-	/** 縦長（高さが幅の 1.05 倍を超える）。 */
+	/** 設定の列の数（auto は写真の枚数で決める）。 */
+	private function columns( string $key, int $count ): string {
+		return match ( (string) ( $this->layout[ $key ] ?? 'auto' ) ) {
+			'2'     => self::UNIT_LAYOUT,
+			'3'     => self::UNIT_GRID,
+			default => self::grid( $count ),
+		};
+	}
+
+	/** 縦長（高さが幅の 1.05 倍を超える）。トリミングの自動設定を切っていれば常に false。 */
 	private function portrait( int $id ): bool {
+		if ( array_key_exists( 'auto_trim', $this->layout ) && ! $this->layout['auto_trim'] ) {
+			return false;
+		}
 		$r = self::image_ratio( $id, $this->dims );
 		return null !== $r && $r < 0.95;
 	}
 
-	/** 縦長ではなく、4:3 から外れる（横に長い・正方形に近い）。 */
+	/** 縦長ではなく、4:3 から外れる（横に長い・正方形に近い）。トリミングの自動設定を切っていれば常に false。 */
 	private function off43( int $id ): bool {
+		if ( array_key_exists( 'auto_trim', $this->layout ) && ! $this->layout['auto_trim'] ) {
+			return false;
+		}
 		$r = self::image_ratio( $id, $this->dims );
 		return null !== $r && $r >= 0.95 && abs( $r - 4 / 3 ) > 0.1;
 	}

@@ -15,8 +15,6 @@
 namespace WpAiCase\Admin;
 
 use WpAiCase\Acf\SchemaInspector;
-use WpAiCase\Display\DisplayNotes;
-use WpAiCase\Display\ThemeReader;
 use WpAiCase\Mapping\MappingService;
 use WpAiCase\Mapping\StagingValidator;
 use WpAiCase\Plugin;
@@ -93,35 +91,6 @@ final class MappingPage {
 		$service = new MappingService();
 		$back    = isset( $_POST['back'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['back'] ) ) : '';
 		try {
-			if ( 'display_build' === $op ) {
-				if ( empty( $_POST['consent'] ) ) {
-					throw new CaseError( CaseError::INVALID_TRANSITION, '送信するファイルを確認したことのチェックを入れてください' );
-				}
-				try {
-					$r = DisplayNotes::build( $user );
-				} catch ( CaseError $e ) {
-					$found = (array) ( $e->context['found'] ?? array() );
-					throw new CaseError( $e->reason, $e->getMessage() . ( $found ? '：' . implode( '、', $found ) : '' ), $e->context );
-				}
-				self::flash( 'success', '表示メモを作りました（承認待ち）。内容を確かめて承認してください。推定費用 $' . number_format( (float) $r['cost']['usd'], 4 ) . '。', $back );
-			}
-			if ( 'display_approve' === $op ) {
-				DisplayNotes::approve( $user );
-				self::flash( 'success', '表示メモを承認しました。これから作る・修正する下書きで使います。', $back );
-			}
-			if ( 'example_set' === $op ) {
-				$id = isset( $_POST['example_post'] ) ? absint( $_POST['example_post'] ) : 0;
-				try {
-					\WpAiCase\Display\StyleExample::set( $id );
-				} catch ( \InvalidArgumentException $e ) {
-					throw new CaseError( CaseError::INVALID_TRANSITION, $e->getMessage() );
-				}
-				self::flash( 'success', $id ? '書き方の手本を設定しました。これから作る・修正する下書きで使います。' : '書き方の手本を外しました。', $back );
-			}
-			if ( 'display_discard' === $op ) {
-				DisplayNotes::discard( $user );
-				self::flash( 'success', '表示メモを削除しました。標準のメモ（shipinc テーマで確かめた内容）を使います。', $back );
-			}
 			if ( 'cleanup_all' === $op ) {
 				$n = ( new StagingValidator( $service ) )->cleanup();
 				self::flash( 'success', "検証用の下書き {$n} 件と検証用の画像を削除しました。", $back );
@@ -182,114 +151,6 @@ final class MappingPage {
 		} catch ( CaseError $e ) {
 			self::flash( 'error', $e->ai_code() . '：' . $e->getMessage(), $back );
 		}
-	}
-
-	/**
-	 * テーマでの表示（表示メモ）：状態・送るファイル・メモの内容・操作。
-	 */
-	private static function render_display( string $back ): void {
-		$status = DisplayNotes::status();
-		$s      = DisplayNotes::stored();
-		$labels = array(
-			'none'     => array( 'warning', '表示メモはまだありません。標準のメモ（shipinc テーマで確かめた内容）を使っています。' ),
-			'draft'    => array( 'warning', '表示メモを作りました（承認待ち）。内容を確かめて承認すると、記事の作成・修正に使います。' ),
-			'approved' => array( 'success', '承認済みの表示メモを、記事の作成・修正と保存前のチェックに使っています。' ),
-			'stale'    => array( 'error', '表示メモを作った後に、テーマのファイルが変わりました。作り直して承認するまで、標準のメモを使います。' ),
-		);
-		[ $tone, $text ] = $labels[ $status ];
-		echo '<h2>' . esc_html( 'テーマでの表示（表示メモ）' ) . '</h2><div class="wpaic-map-card">';
-		echo '<p class="description">' . esc_html( '施工事例の表示に使うテーマのファイルを読み取り専用で AI に1回送り、欄ごとに「どこに出るか・テーマが自分で出す見出し（施工前など）・ほかの使われ方（alt・一覧カード）・長さ」をまとめます。記事を作るときの AI への指示と、保存前のチェック（テーマが出す言葉と同じ見出し・キャプションを除く）に使います。テーマのファイルは書き換えません。' ) . '</p>';
-		printf( '<p class="wpaic-map-state is-%s"><strong>%s</strong></p>', esc_attr( $tone ), esc_html( $text ) );
-
-		try {
-			$set = ThemeReader::collect();
-		} catch ( \Throwable $e ) {
-			$set = array( 'frame' => '', 'files' => array(), 'skipped' => array() );
-		}
-		$total  = array_sum( array_map( static fn( $f ) => min( (int) $f['bytes'], ThemeReader::MAX_FILE ), $set['files'] ) );
-		$reason = array( 'works' => '名前に works', 'part' => '呼ばれる部品（施工事例の項目を使う）', 'style' => 'スタイル（SCSS）' );
-		echo '<details class="wpaic-map-more"' . ( 'none' === $status ? ' open' : '' ) . '><summary>' . esc_html( sprintf( '送るファイル（%d 件・約 %s KB%s）', count( $set['files'] ), number_format( $total / 1024, 0 ), '' !== $set['frame'] ? '・フレーム ' . strtoupper( $set['frame'] ) : '' ) ) . '</summary><table class="widefat striped"><thead><tr><th>' . esc_html( 'ファイル' ) . '</th><th>' . esc_html( '理由' ) . '</th><th>' . esc_html( '大きさ' ) . '</th></tr></thead><tbody>';
-		foreach ( $set['files'] as $f ) {
-			printf( '<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>', esc_html( (string) $f['path'] ), esc_html( $reason[ $f['reason'] ] ?? $f['reason'] ), esc_html( number_format( (int) $f['bytes'] / 1024, 1 ) . ' KB' . ( ! empty( $f['truncated'] ) ? '（途中まで）' : '' ) ) );
-		}
-		foreach ( $set['skipped'] as $f ) {
-			printf( '<tr><td><code>%s</code></td><td colspan="2">%s</td></tr>', esc_html( (string) $f['path'] ), esc_html( '大きさの上限のため送らない' ) );
-		}
-		echo '</tbody></table><p class="description">' . esc_html( 'コンパイル済みの CSS・使っていないフレーム・old_ のファイルは送りません。送る前に、APIキーなどの秘密らしい文字列がないか調べ、あれば送りません。' ) . '</p></details>';
-
-		if ( $s ) {
-			printf( '<p class="description">%s</p>', esc_html( sprintf( '作成：%s（%s・%s）。推定費用 $%s。%s', get_date_from_gmt( gmdate( 'Y-m-d H:i:s', strtotime( (string) $s['created_at'] ) ), 'Y-m-d H:i' ), (string) $s['theme'], (string) $s['model'], number_format( (float) $s['usd'], 4 ), ! empty( $s['approved_at'] ) ? '承認：' . get_date_from_gmt( gmdate( 'Y-m-d H:i:s', strtotime( (string) $s['approved_at'] ) ), 'Y-m-d H:i' ) : '' ) ) );
-			echo '<table class="widefat striped wpaic-map-notes"><thead><tr><th>' . esc_html( '欄' ) . '</th><th>' . esc_html( '表示' ) . '</th><th>' . esc_html( 'どこに出るか' ) . '</th><th>' . esc_html( 'テーマが出す見出し・ラベル' ) . '</th><th>' . esc_html( 'ほかの使われ方・長さ・書かないこと' ) . '</th></tr></thead><tbody>';
-			foreach ( (array) $s['notes']['targets'] as $t ) {
-				$other = array_merge( (array) $t['also_used_as'], '' !== $t['length_hint'] ? array( '長さ：' . $t['length_hint'] ) : array(), array_map( static fn( $a ) => '書かない：' . $a, (array) $t['avoid'] ) );
-				printf(
-					'<tr><th>%s</th><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-					esc_html( DisplayNotes::TARGETS[ $t['id'] ][0] ?? $t['id'] ),
-					esc_html( $t['shown'] ? '出る' : '出ない' ),
-					esc_html( (string) $t['where'] ),
-					esc_html( implode( '、', (array) $t['theme_labels'] ) ),
-					esc_html( implode( ' ／ ', $other ) )
-				);
-			}
-			echo '</tbody></table>';
-			if ( ! empty( $s['notes']['warnings'] ) ) {
-				echo '<div class="notice notice-warning inline"><p>' . esc_html( '注意：' ) . '</p><ul>';
-				foreach ( (array) $s['notes']['warnings'] as $w ) {
-					printf( '<li>%s</li>', esc_html( (string) $w ) );
-				}
-				echo '</ul></div>';
-			}
-		}
-
-		echo '<div class="wpaic-map-actions">';
-		if ( 'draft' === $status ) {
-			self::form( 'display_approve', '', array(), '表示メモを承認して使う', 'primary', $back );
-		}
-		self::form(
-			'display_build',
-			'',
-			array(),
-			'none' === $status ? 'テーマのファイルを読み取って表示メモを作る' : '表示メモを作り直す',
-			'none' === $status || 'stale' === $status ? 'primary' : 'secondary',
-			$back,
-			'<p><label><input type="checkbox" name="consent" value="1" required> ' . esc_html( '上の一覧のテーマのファイル（中身）を ' . \WpAiCase\Diagnostics\Settings::info()['label'] . ' へ送信することに同意します（費用の目安：1回 約 $0.01）' ) . '</label></p>'
-		);
-		if ( $s ) {
-			self::form( 'display_discard', '', array(), '表示メモを削除する', 'delete', $back );
-		}
-		echo '</div></div>';
-	}
-
-	/**
-	 * 書き方の手本（任意）。
-	 */
-	private static function render_example( string $back ): void {
-		$current = \WpAiCase\Display\StyleExample::post_id();
-		echo '<h2>' . esc_html( '書き方の手本（任意）' ) . '</h2><div class="wpaic-map-card">';
-		echo '<p class="description">' . esc_html( 'このサイトの施工事例の記事を1つ選ぶと、その文章（コンセプト・ご要望・ご提案・施工前・中・後の文章と各欄の文字数）を、AI に書き方と長さの手本として渡します。手本の記事の事実（地名・材料・色など）は使わせません。お客様の声・担当スタッフのコメント・写真は渡しません。' ) . '</p>';
-		$posts = get_posts(
-			array(
-				'post_type'      => Plugin::POST_TYPE,
-				'post_status'    => array( 'publish', 'draft', 'private' ),
-				'posts_per_page' => 200,
-				'orderby'        => 'date',
-				'order'          => 'DESC',
-				'meta_query'     => array( array( 'key' => \WpAiCase\Draft\DraftWriter::POC_MARK, 'compare' => 'NOT EXISTS' ) ), // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
-			)
-		);
-		$opts = '<option value="0">' . esc_html( '（使わない）' ) . '</option>';
-		foreach ( $posts as $p ) {
-			$opts .= sprintf( '<option value="%d"%s>%s</option>', (int) $p->ID, selected( $current, (int) $p->ID, false ), esc_html( html_entity_decode( get_the_title( $p ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) . '（ID: ' . $p->ID . ( 'publish' !== $p->post_status ? '・' . $p->post_status : '' ) . '）' ) );
-		}
-		$ex = \WpAiCase\Display\StyleExample::for_prompt();
-		if ( $current && $ex ) {
-			$l = $ex['lengths'];
-			printf( '<p>%s</p>', esc_html( sprintf( '使用中：ID %d（説明 %d字・ご要望 %d字・ご提案 %d字・施工前 %d字・施工中 %s字・施工後 %d字）', $current, $l['summary'], $l['request'], $l['proposal'], $l['before'], implode( '／', $l['during'] ) ?: '0', $l['after'] ) ) );
-		} elseif ( $current ) {
-			echo '<div class="notice notice-warning inline"><p>' . esc_html( '選んだ記事から文章を読み取れませんでした（削除されたか、文章の欄が空です）。' ) . '</p></div>';
-		}
-		self::form( 'example_set', '', array(), '手本を保存', 'secondary', $back, '<p><select name="example_post" style="max-width:100%">' . $opts . '</select></p>' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- 上で組み立てたエスケープ済みの選択肢
-		echo '</div>';
 	}
 
 	/**
@@ -423,7 +284,7 @@ final class MappingPage {
 		delete_transient( self::FLASH . get_current_user_id() );
 
 		echo '<div class="wrap wpaic-map"><h1>' . esc_html( 'AI施工事例：マッピング' ) . '</h1>';
-		echo '<p>' . esc_html( 'このサイトのACF（施工事例の入力欄）の構造と、AIで作った下書きの保存先の対応（マッピング）を管理します。承認済みのマッピングがある条件でだけ、下書きを保存できます。外部（AI）へ送るのは、下の「テーマでの表示（表示メモ）」を作るときだけです。' ) . '</p>';
+		echo '<p>' . esc_html( 'このサイトのACF（施工事例の入力欄）の構造と、AIで作った下書きの保存先の対応（マッピング）を管理します。承認済みのマッピングがある条件でだけ、下書きを保存できます。外部（AI）へは通信しません。' ) . '</p>';
 		if ( is_array( $flash ) ) {
 			printf( '<div class="notice notice-%s"><p>%s</p></div>', esc_attr( (string) $flash['type'] ), esc_html( (string) $flash['text'] ) );
 		}
@@ -447,8 +308,7 @@ final class MappingPage {
 		submit_button( '確認', 'secondary', '', false );
 		echo '</form>';
 
-		self::render_display( $extra );
-		self::render_example( $extra );
+		printf( '<p class="description">%s <a href="%s">%s</a></p>', esc_html( '記事の並べ方・書き方・書き方の手本・テーマでの表示（表示メモ）は' ), esc_url( ArticlePage::url() ), esc_html( '「記事の作り方」で設定します。' ) );
 
 		echo '<h2>' . esc_html( '検証用の下書き・画像' ) . '</h2><p class="description">' . esc_html( '検証用の下書き（【検証用】）は下書きのままで公開されません。承認すると、その版の検証用の下書きは自動で削除されます。' ) . '</p>';
 		self::form( 'cleanup_all', '', array(), '検証用の下書きと画像をすべて削除', 'delete', $extra );

@@ -42,6 +42,7 @@ final class Plugin {
 			\WP_CLI::add_command( 'ai-case', Cli\Commands::class );
 			\WP_CLI::add_command( 'ai-case mapping', Cli\MappingCommand::class );
 			\WP_CLI::add_command( 'ai-case display', Cli\DisplayCommand::class );
+			\WP_CLI::add_command( 'ai-case article', Cli\ArticleCommand::class );
 		}
 
 		$dev_bootstrap = WP_AI_CASE_DIR . '/dev/bootstrap.php';

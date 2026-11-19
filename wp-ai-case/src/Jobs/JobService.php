@@ -496,6 +496,7 @@ final class JobService {
 			'allowed_sections' => $allowed,
 			'instruction'      => $instruction,
 			'article_policy'   => (string) ( $job['data']['input']['article_policy'] ?? '' ),
+			'article_rules'    => \WpAiCase\Display\ArticleSettings::for_prompt(),
 			'display_notes'    => \WpAiCase\Display\DisplayNotes::for_prompt(),
 			'style_example'    => \WpAiCase\Display\StyleExample::for_prompt(),
 		);
@@ -1012,6 +1013,7 @@ final class JobService {
 			'facts'                 => $data['input']['primary_facts'],
 			'photo_set_description' => $data['input']['photo_set_description'],
 			'article_policy'        => (string) ( $data['input']['article_policy'] ?? '' ),
+			'article_rules'         => \WpAiCase\Display\ArticleSettings::for_prompt(),
 			'display_notes'         => \WpAiCase\Display\DisplayNotes::for_prompt(),
 			'style_example'         => \WpAiCase\Display\StyleExample::for_prompt(),
 			'categories'            => (array) ( $data['input']['terms'] ?? array() ) ? array() : self::categories(),

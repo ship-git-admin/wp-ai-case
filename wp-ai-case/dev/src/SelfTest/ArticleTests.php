@@ -75,7 +75,7 @@ final class ArticleTests {
 	private function template(): void {
 		$t = $this->t;
 		$t->test( 'A-01', 'テンプレート 1.2：概要の順（地域→建物→築年数→施工箇所→施工内容）・施主様名＝地域・お客様の声・ご要望とご提案は文章の節から', function () {
-			$built = ( new ShipWorksTemplateV11() )->build( SampleDocument::get() );
+			$built = ( new ShipWorksTemplateV11() )->build( SampleDocument::get(), array( 'layout' => \WpAiCase\Display\ArticleSettings::defaults()['layout'] ) );
 			$f     = $built['fields'];
 			$this->t->same(
 				array( 'Outline_Label_Area', 'Outline_Label_Building-classification', 'Outline_Label_Age', 'Outline_Label_Parts', 'Outline_Label_Content', 'Outline_Label_Period', 'Outline_Label_Cost', 'Outline_Label_Floor-plan', 'Outline_Label_Site' ),
@@ -91,7 +91,7 @@ final class ArticleTests {
 		} );
 
 		$t->test( 'A-02', 'テンプレート 1.2：施工前は 写真→見出し＋文章、施工中は工程ごとに 見出し→写真→文章、施工後は 1枚目を大きく→見出し＋文章→残り。説明文は空', function () {
-			$built  = ( new ShipWorksTemplateV11() )->build( SampleDocument::get() );
+			$built  = ( new ShipWorksTemplateV11() )->build( SampleDocument::get(), array( 'layout' => \WpAiCase\Display\ArticleSettings::defaults()['layout'] ) );
 			$detail = $built['fields']['Format'][0]['EntryData_Group_Detail'];
 			$shape  = static fn( array $rows ) => array_map(
 				static function ( $r ) {
@@ -124,7 +124,7 @@ final class ArticleTests {
 		$t->test( 'A-14', '写真の縦横で表示の設定を決める：縦長は「縦長用リサイズ」、4:3 から外れる横長は「トリミング解除」。トップの写真・施工後の大きい1枚は1枚目のまま（縦長なら縦長用リサイズ）', function () {
 			$doc  = SampleDocument::get();
 			$dims = array( 1 => array( 1478, 1108 ), 2 => array( 768, 1024 ), 3 => array( 2000, 819 ), 4 => array( 1108, 1477 ), 5 => array( 1477, 1108 ), 6 => array( 1000, 1000 ) );
-			$b    = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'before_after' ) );
+			$b    = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'before_after', 'layout' => \WpAiCase\Display\ArticleSettings::defaults()['layout'] ) );
 			$d    = $b['fields']['Format'][0]['EntryData_Group_Detail'];
 			$mae  = $d['EntryData_SectionMae'][0];
 			$this->t->same( array( false, true ), array_column( $mae['EntryData_PictureMae'], 'EntryData_PictureMae_Trim' ), '施工前：縦長の写真だけ縦長用リサイズ' );
@@ -136,10 +136,51 @@ final class ArticleTests {
 			$fv = $b['fields']['FV_Layout_BeforeAfter'];
 			$this->t->same( array( 1, 4, false, true ), array( $fv['FV_Layout_BeforeAfter_Image_Before'], $fv['FV_Layout_BeforeAfter_Image_After'], $fv['FV_Layout_BeforeAfter_BeforeTrim'], $fv['FV_Layout_BeforeAfter_AfterTrim'] ), 'トップの写真：After が縦長なら縦長用リサイズ' );
 			$only_portrait = array( 1 => array( 768, 1024 ), 2 => array( 768, 1024 ), 4 => array( 768, 1024 ), 5 => array( 768, 1024 ) );
-			$fv2 = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $only_portrait, 'hero' => 'before_after' ) )['fields']['FV_Layout_BeforeAfter'];
+			$fv2 = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $only_portrait, 'hero' => 'before_after', 'layout' => \WpAiCase\Display\ArticleSettings::defaults()['layout'] ) )['fields']['FV_Layout_BeforeAfter'];
 			$this->t->same( array( true, true ), array( $fv2['FV_Layout_BeforeAfter_BeforeTrim'], $fv2['FV_Layout_BeforeAfter_AfterTrim'] ), '縦長しかなければ縦長用リサイズ' );
-			$g = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'gallery' ) )['fields']['FV_Layout_Gallery'];
+			$g = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'hero' => 'gallery', 'layout' => \WpAiCase\Display\ArticleSettings::defaults()['layout'] ) )['fields']['FV_Layout_Gallery'];
 			$this->t->same( array( false, true, false, true, false, false ), array_column( $g, 'FV_Layout_Gallery_Trim' ), 'ギャラリーは縦長だけ縦長用リサイズ' );
+		} );
+
+		$t->test( 'A-17', '記事の作り方の設定：知らない値は初期値に戻す・書き出しと読み込みで同じになる・初期値に戻せる', function () {
+			$saved = get_option( \WpAiCase\Display\ArticleSettings::OPTION, null );
+			try {
+				$c = \WpAiCase\Display\ArticleSettings::sanitize( array( 'layout' => array( 'after_columns' => '1', 'during_columns' => '3', 'after_large' => '1' ), 'writing' => array( 'rules' => '<b>専門用語に説明を付ける</b>', 'lengths' => array( 'summary' => array( 400, 300 ), 'catch' => array( 'x', 50 ) ) ) ) );
+				$this->t->same( array( '2', '3', true ), array( $c['layout']['after_columns'], $c['layout']['during_columns'], $c['layout']['after_large'] ), '列の数（知らない値は初期値）' );
+				$this->t->same( array( '専門用語に説明を付ける', array( 300, 400 ), array( 30, 50 ) ), array( $c['writing']['rules'], $c['writing']['lengths']['summary'], $c['writing']['lengths']['catch'] ), '書き方（タグを除く・最小と最大の入れ替え・数でない値は初期値）' );
+				\WpAiCase\Display\ArticleSettings::save( $c );
+				$json = \WpAiCase\Display\ArticleSettings::export();
+				\WpAiCase\Display\ArticleSettings::reset();
+				$this->t->same( \WpAiCase\Display\ArticleSettings::defaults(), \WpAiCase\Display\ArticleSettings::get(), '初期値に戻す' );
+				\WpAiCase\Display\ArticleSettings::import( $json );
+				$this->t->same( $c, \WpAiCase\Display\ArticleSettings::get(), '書き出し → 読み込みで同じ' );
+				$threw = false;
+				try {
+					\WpAiCase\Display\ArticleSettings::import( '{"a":1}' );
+				} catch ( \InvalidArgumentException $e ) {
+					$threw = true;
+				}
+				$this->t->true( $threw, '形の違う JSON は読み込まない' );
+				$p = \WpAiCase\Display\ArticleSettings::for_prompt();
+				$this->t->same( array( '専門用語に説明を付ける', '300〜400字', false, false ), array( $p['site_rules'], $p['lengths']['summary'], $p['phase_headings'], $p['photo_titles'] ), 'AI に渡す形' );
+				$this->t->true( str_contains( Prompts::compose_text( array( 'mode' => 'full', 'images' => array(), 'article_rules' => $p ) ), '専門用語に説明を付ける' ), '依頼の本文に入る' );
+			} finally {
+				null === $saved ? delete_option( \WpAiCase\Display\ArticleSettings::OPTION ) : update_option( \WpAiCase\Display\ArticleSettings::OPTION, $saved, false );
+				\WpAiCase\Display\ArticleSettings::flush();
+			}
+		} );
+
+		$t->test( 'A-18', '並べ方の設定がテンプレートに効く：列の数・施工後の1枚目を大きく・小見出し・写真の見出し・トリミングの自動設定', function () {
+			$doc  = SampleDocument::get();
+			$dims = array( 1 => array( 1478, 1108 ), 2 => array( 768, 1024 ), 3 => array( 2000, 819 ), 4 => array( 1108, 1477 ), 5 => array( 1477, 1108 ) );
+			$lay  = array_merge( \WpAiCase\Display\ArticleSettings::defaults()['layout'], array( 'before_columns' => '3', 'during_columns' => '3', 'after_large' => true, 'phase_headings' => true, 'photo_titles' => true, 'auto_trim' => false ) );
+			$d    = ( new ShipWorksTemplateV11() )->build( $doc, array( 'dims' => $dims, 'layout' => $lay ) )['fields']['Format'][0]['EntryData_Group_Detail'];
+			$mae  = $d['EntryData_SectionMae'];
+			$this->t->same( array( 'type-c', '01', 'sample heading before' ), array( $mae[0]['EntryData_PictureMae_layout'], $mae[1]['EntryData_Detail_Layout'], $mae[1]['EntryData_Detail_Catch'] ), '施工前：3列・小見出しあり' );
+			$this->t->same( array( 'sample caption 1', 'sample caption 2' ), array_column( $mae[0]['EntryData_PictureMae'], 'EntryData_PictureMae_Title' ), '写真の見出しを出す' );
+			$this->t->same( array( false, false ), array( $mae[0]['EntryData_PictureMae'][1]['EntryData_PictureMae_Trim'], array_values( array_filter( $d['EntryData_SectionChu'], static fn( $r ) => 'EntryData_SectionChu_Unit' === $r['acf_fc_layout'] ) )[0]['EntryData_PictureChu_Trim02'] ), 'トリミングの自動設定を切る' );
+			$go = $d['EntryData_SectionGo'];
+			$this->t->same( array( 'type-a', 1, 'EntryData_SectionGo_SubTitle', 'type-b' ), array( $go[0]['EntryData_PictureGo_layout'], count( $go[0]['EntryData_PictureGo'] ), $go[1]['acf_fc_layout'], $go[2]['EntryData_PictureGo_layout'] ), '施工後：1枚目を1列で大きく → 文章 → 残り（2列）' );
 		} );
 
 		$t->test( 'A-03', '施工中の工程：写真は1回だけ使い、どの工程にも入らない写真は最後に見出しなしでまとめる', function () {
