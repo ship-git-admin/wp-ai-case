@@ -55,3 +55,6 @@
 .wpaic-cat-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 4px 0; }
 .wpaic-cat-label { min-width: 8em; color: #50575e; font-size: 12px; }
 .wpaic-cat-group .wpaic-checks { margin: 0; }
+/* 長い選択肢（お客様の声の題名など）で画面の幅を超えないように */
+.wpaic select { max-width: 100%; }
+.wpaic-form label { overflow-wrap: anywhere; }

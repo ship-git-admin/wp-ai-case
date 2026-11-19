@@ -250,7 +250,7 @@
 				notes.push( h( 'li', { text: '保存後に編集画面で更新されています（編集画面で変えた部分に重なる修正は保存できません）' } ) );
 			}
 			if ( d.was_published ) {
-				notes.push( h( 'li', { text: '一度公開された可能性があります。下書きの間は公開ページは表示されません' } ) );
+				notes.push( h( 'li', { text: '公開日が設定されています（一度公開されたか、編集画面で日付が変更されています）。下書きの間は公開ページは表示されません' } ) );
 			}
 			list.appendChild( h( 'li', { class: 'wpaic-draft' },
 				h( 'div', {}, h( 'strong', { text: d.title || '（タイトルなし）' } ), h( 'br' ), h( 'span', { class: 'description', text: '更新：' + d.modified + '　版 ' + d.version } ),
@@ -639,7 +639,7 @@
 					h( 'ul', {}, job.target.edited.map( function ( t ) { return h( 'li', { text: t } ); } ) ) ) );
 			}
 			if ( job.target.was_published ) {
-				wrap.appendChild( h( 'div', { class: 'notice notice-warning inline' }, h( 'p', { text: 'この投稿は一度公開された可能性があります。下書きの間は、公開ページは表示されません。ここから公開はできません。' } ) ) );
+				wrap.appendChild( h( 'div', { class: 'notice notice-warning inline' }, h( 'p', { text: 'この投稿には公開日が設定されています（一度公開されたか、編集画面で日付が変更されています）。下書きの間は、公開ページは表示されません。ここから公開はできません。' } ) ) );
 			}
 		}
 		if ( job.error ) {
